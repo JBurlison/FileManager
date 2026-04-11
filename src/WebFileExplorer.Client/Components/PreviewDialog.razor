@@ -1,0 +1,84 @@
+@using System.Net.Http
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+@if (IsLoading)
+{
+    <RadzenProgressBar Value="100" ShowValue="false" Mode="ProgressBarMode.Indeterminate" Style="width:100%" />
+}
+else if (ErrorMessage != null)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" ShowIcon="true">@ErrorMessage</RadzenAlert>
+}
+else if (IsImage)
+{
+    <div style="text-align: center; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; background-color: #f0f0f0;" role="img" aria-label="Image Preview for @FileName">
+        <img src="@ImageUrl" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="@FileName" />
+    </div>
+}
+else
+{
+    <RadzenTextArea @bind-Value="@TextContent" ReadOnly="true" Style="width: 100%; height: 500px; font-family: monospace; white-space: pre-wrap;" aria-label=@($"Text Preview for {FileName}") />
+}
+
+@code {
+    [Parameter]
+    public string FilePath { get; set; } = default!;
+
+    [Parameter]
+    public string FileName { get; set; } = default!;
+
+    private bool IsLoading = true;
+    private string? ErrorMessage = null;
+    private bool IsImage;
+    private string? ImageUrl;
+    private string? TextContent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var ext = System.IO.Path.GetExtension(FileName).ToLowerInvariant();
+            IsImage = ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp";
+            
+            if (IsImage)
+            {
+                ImageUrl = $"/api/fileexplorer/download?path={Uri.EscapeDataString(FilePath)}&inline=true";
+                IsLoading = false;
+            }
+            else
+            {
+                var uri = $"/api/fileexplorer/download?path={Uri.EscapeDataString(FilePath)}&inline=true";
+                var response = await Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    const int maxPreviewSize = 100 * 1024; // 100KB
+                    var text = await response.Content.ReadAsStringAsync();
+                    
+                    if (text.Length > maxPreviewSize)
+                    {
+                        TextContent = text.Substring(0, maxPreviewSize);
+                        TextContent += $"\n\n--- Preview truncated at 100KB — File is larger than preview cutoff ---";
+                    }
+                    else
+                    {
+                        TextContent = text;
+                    }
+                }
+                else
+                {
+                    ErrorMessage = $"Failed to load file. Status logic: {response.StatusCode}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading preview: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}

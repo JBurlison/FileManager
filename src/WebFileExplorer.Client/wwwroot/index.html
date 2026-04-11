@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebFileExplorer.Client</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="WebFileExplorer.Client.styles.css" rel="stylesheet" />
+    <link rel="stylesheet" href="_content/Radzen.Blazor/css/standard-dark.css">
+    <script type="importmap"></script>
+</head>
+
+<body class="dark-mode">
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script src="_content/Radzen.Blazor/Radzen.Blazor#[.{fingerprint}].js"></script>
+    <script>
+        window.registerKeyboardInterceptor = (elementId) => {
+            const element = document.getElementById(elementId);
+            if (element) {
+                if (element._keyboardInterceptor) {
+                    element.removeEventListener('keydown', element._keyboardInterceptor);
+                }
+                
+                element._keyboardInterceptor = function(e) {
+                    // Stop default browser behavior for shortcuts that we want Blazor to handle.
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                        return; // Let inputs work normally
+                    }
+                    
+                    const key = e.key.toLowerCase();
+                    if ((e.ctrlKey && (key === 'a' || key === 'c' || key === 'x' || key === 'v')) ||
+                        (e.ctrlKey && e.shiftKey && key === 'n') ||
+                        key === 'f5' || key === 'f2' || key === 'delete' || key === 'backspace' ||
+                        key === 'home' || key === 'end' || key === 'pageup' || key === 'pagedown' || key === 'contextmenu' ||
+                        (e.altKey && (key === 'arrowleft' || key === 'arrowright' || key === 'arrowup'))) {
+                        e.preventDefault();
+                    }
+                };
+                
+                element.addEventListener('keydown', element._keyboardInterceptor);
+            }
+        };
+    </script>
+</body>
+
+</html>

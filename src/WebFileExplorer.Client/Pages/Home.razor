@@ -1,0 +1,2139 @@
+@page "/"
+@implements IDisposable
+@using WebFileExplorer.Shared.Models
+@using Microsoft.Extensions.Logging
+@inject HttpClient Http
+@inject ILogger<Home> Logger
+@inject IJSRuntime JS
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject ContextMenuService ContextMenuService
+@inject WebFileExplorer.Client.Services.ClipboardStateContainer Clipboard
+@inject NavigationManager NavigationManager
+
+<PageTitle>Web File Explorer</PageTitle>
+
+<div class="command-bar-row mb-3" role="toolbar" aria-label="Action Toolbar">
+    <RadzenButton Text="New Folder" Icon="create_new_folder" Click="@CreateFolderDialog" Disabled="@(string.IsNullOrEmpty(_currentPath))" Class="rz-mr-2" ButtonStyle="ButtonStyle.Primary" aria-label="Create New Folder" />
+    <RadzenButton Text="Rename" Icon="edit" Click="@RenameDialog" Disabled="@(!CanRename)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Rename Selected Item" />
+    <RadzenButton Text="Delete" Icon="delete" Click="@(args => DeleteSelected(false))" Disabled="@(!CanDelete)" Class="rz-mr-4" ButtonStyle="ButtonStyle.Danger" aria-label="Delete Selected Items" />
+
+    <RadzenButton Text="Restore" Icon="restore" Click="@RestoreSelected" Disabled="@(!CanRestore)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Success" aria-label="Restore Selected Items" />
+    <RadzenButton Text="Empty Bin" Icon="delete_forever" Click="@EmptyRecycleBin" Disabled="@(!IsRecycleBin)" Class="rz-mr-4" ButtonStyle="ButtonStyle.Danger" aria-label="Empty Recycle Bin" />
+
+    <RadzenButton Text="Cut" Icon="content_cut" Click="@CutSelected" Disabled="@(!CanCut)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Cut Selected Items" />
+    <RadzenButton Text="Copy" Icon="content_copy" Click="@CopySelected" Disabled="@(!CanCopy)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Copy Selected Items" />
+    <RadzenButton Text="Paste" Icon="content_paste" Click="@PasteItems" Disabled="@(!CanPaste)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Paste Items" />
+    <RadzenButton Text="Compress" Icon="folder_zip" Click="@CompressSelected" Disabled="@(!CanCompress)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" title="Compress to ZIP file" aria-label="Compress Selected Items to ZIP" />
+    <RadzenButton Text="Extract" Icon="unarchive" Click="@(args => ExtractSelected(GetSingleZipItem()))" Disabled="@(!CanExtract)" Class="rz-mr-4" ButtonStyle="ButtonStyle.Light" title="Extract All" aria-label="Extract Selected ZIP" />
+
+    <div class="wfe-breadcrumb-container d-flex align-items-center" style="flex: 1;">
+        <RadzenButton Icon="arrow_upward" Click="@NavigateUp" Disabled="@(string.IsNullOrEmpty(_currentPath))" Class="rz-mr-2" title="Up" aria-label="Navigate Up" />
+        <RadzenTextBox @bind-Value="@_addressInput" style="flex: 1" class="rz-mr-2" @onkeyup="@OnAddressKeyUp" aria-label="Address" />
+        <RadzenButton Icon="keyboard_return" Click="@NavigateToAddress" title="Go" Class="rz-mr-4" />
+    </div>
+
+    <RadzenTextBox @bind-Value="@_searchInput" class="rz-mr-2" Placeholder="Search..." @onkeyup="@OnSearchKeyUp" style="width: 150px;" Disabled="@(string.IsNullOrEmpty(_currentPath))" aria-label="Search items" />
+    <RadzenCheckBox @bind-Value=@_searchSubfolders Name="cbSearchSubfolders" Class="rz-mr-2" />
+    <RadzenLabel Text="Subfolders" Component="cbSearchSubfolders" Class="rz-mr-2" />
+    @if (_isSearching)
+    {
+        <RadzenButton Icon="cancel" Click="@CancelSearch" title="Cancel Search" aria-label="Cancel Search" Class="rz-mr-4" ButtonStyle="ButtonStyle.Danger" />
+    }
+    else
+    {
+        <RadzenButton Icon="search" Click="@PerformSearch" title="Search" aria-label="Search" Class="rz-mr-4" Disabled="@(string.IsNullOrEmpty(_currentPath) || string.IsNullOrWhiteSpace(_searchInput))" />
+    }
+
+    <RadzenSelectBar @bind-Value=@_viewMode TValue="string" Class="rz-mr-4" Change=@( (string args) => OnViewModeChanged(args) ) aria-label="Select View Mode">
+        <Items>
+            <RadzenSelectBarItem Text="Details" Value="@("Details")" Icon="view_list" />
+            <RadzenSelectBarItem Text="List" Value="@("List")" Icon="format_list_bulleted" />
+            <RadzenSelectBarItem Text="Small Icons" Value="@("SmallIcons")" Icon="view_module" />
+            <RadzenSelectBarItem Text="Medium Icons" Value="@("MediumIcons")" Icon="view_module" />
+            <RadzenSelectBarItem Text="Large Icons" Value="@("LargeIcons")" Icon="view_module" />
+        </Items>
+    </RadzenSelectBar>
+
+    <RadzenCheckBox @bind-Value=@_showHidden Name="cbHidden" Change=@( (bool args) => OnShowHiddenChanged(args) ) />
+    <RadzenLabel Text="Hidden Items" Component="cbHidden" Class="rz-ml-2" />
+</div>
+
+<RadzenSplitter Orientation="Orientation.Horizontal" class="wfe-splitter">
+    <RadzenSplitterPane Size="250px" Min="150px" Max="500px">
+        <div style="padding: 1rem; overflow: auto; height: 100%;">
+            <RadzenText TextStyle="TextStyle.Subtitle2" Class="mb-3">This PC</RadzenText>
+            @if (_roots == null)
+            {
+                <RadzenProgressBar Value="100" ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+            }
+            else
+            {
+                <RadzenTree Style="width: 100%" @oncontextmenu:preventDefault="true">
+                    @foreach (var node in _treeNodes)
+                    {
+                        @RenderTreeNode(node)
+                    }
+                </RadzenTree>
+            }
+        </div>
+    </RadzenSplitterPane>
+    <RadzenSplitterPane>
+        <div style="padding: 1rem; height: 100%; display: flex; flex-direction: column;">
+            <div class="mb-3">
+                <RadzenBreadCrumb>
+                    <RadzenBreadCrumbItem Text="This PC" @onclick="@(() => { _currentPath = null; _currentItems = null; _addressInput = ""; UpdateBreadcrumbs(); StateHasChanged(); })" Style="cursor:pointer;" />
+                    @foreach (var crumb in _breadcrumbs)
+                    {
+                        var path = crumb.FullPath;
+                        <RadzenBreadCrumbItem Text="@crumb.Name" @onclick="@(() => LoadDirectoryAsync(path))" Style="cursor:pointer;" />
+                    }
+                </RadzenBreadCrumb>
+            </div>
+            
+            <div style="flex: 1; overflow: auto;">
+                @if (_isLoading)
+                {
+                    <RadzenProgressBar Value="100" ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+                }
+                else if (_errorMessage != null)
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false" ShowIcon="true">
+                        @_errorMessage
+                    </RadzenAlert>
+                }
+                else if (_currentItems != null)
+                {
+                    <div id="file-container" style="height: 100%;" tabindex="0" 
+                         role="region" aria-label="File List"
+                         @onkeydown="OnKeyDown"
+                         @oncontextmenu="OnContainerContextMenu"
+                         @oncontextmenu:preventDefault="true">
+                        @if (_viewMode == "Details")
+                        {
+                            <RadzenDataGrid @ref="_dataGrid" Data="@_currentItems"   TItem="FileSystemItem" 
+                                RowDoubleClick="@OnRowDoubleClick" RowSelect="@OnRowSelect"
+                                RowRender="@OnRowRender"
+                                AllowSorting="true" Style="height: 100%"
+                                AllowVirtualization="true"
+                                SelectionMode="DataGridSelectionMode.Multiple"
+                                @bind-Value=@_selectedItems>
+                                <Columns>
+                                    <RadzenDataGridColumn TItem="FileSystemItem" Property="Name" Title="Name">
+                                        <Template Context="item">
+                                            <div draggable="true" 
+                                                 @ondragstart="@(e => OnDragStart(e, item))"
+                                                 @ondrop="@(e => OnDrop(e, item))"
+                                                 @ondragend="OnDragEnd"
+                                                 @ondragover:preventDefault
+                                                 @ondragenter:preventDefault
+                                                 class="@(IsGhosted(item) ? "item-ghosted" : "")"
+                                                 style="display: flex; align-items: center;">
+                                                <RadzenIcon Icon="@GetIconForItem(item)" Class="@($"rz-mr-1 {GetIconClass(item)}")" />
+                                                @item.Name
+                                            </div>
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                    @if (_isSearchResults)
+                                    {
+                                        <RadzenDataGridColumn TItem="FileSystemItem" Property="FullPath" Title="Location">
+                                            <Template Context="item">
+                                                @(GetDirectoryName(item.FullPath))
+                                            </Template>
+                                        </RadzenDataGridColumn>
+                                    }
+                                    @if (IsRecycleBin)
+                                    {
+                                        <RadzenDataGridColumn TItem="FileSystemItem" Property="OriginalPath" Title="Original Path" />
+                                        <RadzenDataGridColumn TItem="FileSystemItem" Property="DeletionTime" Title="Date Deleted" FormatString="{0:g}" />
+                                    }
+                                    else
+                                    {
+                                        <RadzenDataGridColumn TItem="FileSystemItem" Property="LastModified" Title="Date Modified" FormatString="{0:g}" />
+                                    }
+                                    <RadzenDataGridColumn TItem="FileSystemItem" Property="Type" Title="Type" />
+                                    <RadzenDataGridColumn TItem="FileSystemItem" Property="Size" Title="Size">
+                                        <Template Context="item">
+                                            @(item.Type == FileSystemItemType.Folder ? "" : FormatSize(item.Size))
+                                        </Template>
+                                    </RadzenDataGridColumn>
+                                </Columns>
+                            </RadzenDataGrid>
+                        }
+                        else
+                        {
+                            <div class="custom-view-container @(_viewMode.ToLower())" @onclick="ClearSelection" role="grid" aria-label="File Items">
+                                <Virtualize Items="@_currentItems.ToList()" Context="item">
+                                    @{
+                                        bool isSelected = _selectedItems.Contains(item) || (_focusedItem == item && _selectedItems.Count == 0);
+                                        bool isFocused = _focusedItem == item;
+                                    }
+                                    <div class="custom-view-item @(isSelected ? "selected" : "") @(isFocused ? "focused" : "") @(IsGhosted(item) ? "item-ghosted" : "")"
+                                         role="row"
+                                         aria-selected="@(isSelected ? "true" : "false")"
+                                         aria-label="@($"{item.Name}, {(item.Type == FileSystemItemType.Folder ? "Folder" : "File")}, {(item.Type == FileSystemItemType.Folder ? "" : FormatSize(item.Size))}")"
+                                         draggable="true"
+                                         @ondragstart="@(e => OnDragStart(e, item))"
+                                         @ondrop="@(e => OnDrop(e, item))"
+                                         @ondragend="OnDragEnd"
+                                         @ondragover:preventDefault
+                                         @ondragenter:preventDefault
+                                         @onclick="(e) => OnItemClick(e, item)"
+                                         @ondblclick="() => OnItemDoubleClick(item)"
+                                         @oncontextmenu="@(e => OnContextMenu(e, item))"
+                                         @oncontextmenu:preventDefault="true"
+                                         @onclick:stopPropagation="true">
+                                        @if (IsImageFile(item) && (_viewMode == "LargeIcons" || _viewMode == "MediumIcons"))
+                                        {
+                                            <img src="@($"api/fileexplorer/download?path={Uri.EscapeDataString(item.FullPath)}&inline=true")" 
+                                                 class="item-thumbnail" alt="@item.Name" loading="lazy" />
+                                        }
+                                        else
+                                        {
+                                            <RadzenIcon Icon="@GetIconForItem(item)" Class="@($"item-icon {GetIconClass(item)}")" />
+                                        }
+                                        <span class="item-name">@item.Name</span>
+                                    </div>
+                                </Virtualize>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            @if (_currentItems != null)
+            {
+                <div class="status-bar d-flex align-items-center p-2 bg-light border-top" style="flex-shrink: 0;">
+                    <span class="rz-mr-4">@_currentItems.Count() items</span>
+                    @if (_selectedItems.Count > 0)
+                    {
+                        <span>@_selectedItems.Count items selected (@FormatSize(_selectedItems.Sum(i => i.Size)))</span>
+                    }
+                </div>
+            }
+        </div>
+    </RadzenSplitterPane>
+</RadzenSplitter>
+
+@code {
+    private const int ColumnsSmallIcons = 6;
+    private const int ColumnsMediumIcons = 4;
+    private const int ColumnsLargeIcons = 3;
+    private const int ColumnsDefaultList = 1;
+
+    private IEnumerable<DriveItem>? _roots;
+    private IEnumerable<FileSystemItem>? _currentItems;
+    private string? _currentPath;
+    private string _addressInput = "";
+    private bool _isLoading = false;
+    private string? _errorMessage = null;
+
+    private string _viewMode = "Details";
+    private bool _showHidden = false;
+    
+    private string _searchInput = "";
+    private bool _isSearching = false;
+    private bool _isSearchResults = false;
+    private bool _searchSubfolders = true;
+    private System.Threading.CancellationTokenSource? _searchCts;
+    
+    private RadzenDataGrid<FileSystemItem>? _dataGrid;
+    private IList<FileSystemItem> _selectedItems = new List<FileSystemItem>();
+    private FileSystemItem? _focusedItem;
+    private FileSystemItem? _lastClickedItem;
+
+    private bool _needsKeyboardRegistration = false;
+    private List<(string Name, string FullPath)> _breadcrumbs = new();
+    private List<string> _draggedItems = new();
+    private List<string> _postLoadSelectionPaths = new();
+    private string? _pendingSortProperty;
+    private int? _pendingSortOrder;
+    private int _totalCount;
+    private double? _pendingScrollPosition;
+    
+    private List<string> _history = new();
+    private int _historyIndex = -1;
+    private string _typeBuffer = "";
+    private DateTime _lastTypeTime = DateTime.MinValue;
+
+    private RadzenTree? _tree;
+    private Dictionary<string, FileSystemItem> _loadedTreeItemMap = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<object> _expandedNodes = new();
+    private object? _selectedTreeItem;
+
+    [Parameter]
+    [SupplyParameterFromQuery]
+    public string? Path { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Path != null && _currentPath != Path)
+        {
+            await LoadDirectoryAsync(Path);
+            _addressInput = Path;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var roots = await Http.GetFromJsonAsync<IEnumerable<DriveItem>>("api/fileexplorer/roots");
+            var rootsList = roots?.ToList() ?? new List<DriveItem>();
+            rootsList.Add(new DriveItem("Recycle Bin", "::RecycleBin::", 0, 0));
+            _roots = rootsList;
+
+            _treeNodes = rootsList.Select(r => new TreeNodeObj
+            {
+                Name = r.Name,
+                Path = r.RootDirectory,
+                IsDrive = true
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching roots: {Message}", ex.Message);
+            _roots = Array.Empty<DriveItem>();
+            _treeNodes = new();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && string.IsNullOrEmpty(Path) && string.IsNullOrEmpty(_currentPath))
+        {
+            try
+            {
+                var stateJson = await JS.InvokeAsync<string>("sessionStorage.getItem", "fileExplorerState");
+                if (!string.IsNullOrEmpty(stateJson))
+                {
+                    var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var state = System.Text.Json.JsonSerializer.Deserialize<ExplorerState>(stateJson, options);
+                    if (state != null)
+                    {
+                        if (!string.IsNullOrEmpty(state.ViewMode)) _viewMode = state.ViewMode;
+                        _showHidden = state.ShowHidden;
+                        
+                        if (state.History != null)
+                        {
+                            _history = state.History;
+                            _historyIndex = state.HistoryIndex;
+                        }
+
+                        if (!string.IsNullOrEmpty(state.LastPath))
+                        {
+                            if (state.SelectedPaths != null && state.SelectedPaths.Any())
+                            {
+                                _postLoadSelectionPaths = state.SelectedPaths;
+                            }
+                            _pendingSortProperty = state.SortProperty;
+                            _pendingSortOrder = state.SortOrder;
+                            _pendingScrollPosition = state.ScrollPosition;
+                            await LoadDirectoryAsync(state.LastPath);
+                        }
+                    }
+                }
+                else
+                {
+                    var lastPath = await JS.InvokeAsync<string>("sessionStorage.getItem", "lastPath");
+                    if (!string.IsNullOrEmpty(lastPath))
+                    {
+                        await LoadDirectoryAsync(lastPath);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if (_needsKeyboardRegistration && _currentItems != null)
+        {
+            _needsKeyboardRegistration = false;
+            try 
+            {
+                await JS.InvokeVoidAsync("registerKeyboardInterceptor", "file-container");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to register keyboard interceptor.");
+            }
+        }
+    }
+
+    private class ExplorerState
+    {
+        public string? LastPath { get; set; }
+        public string? ViewMode { get; set; }
+        public bool ShowHidden { get; set; }
+        public List<string> SelectedPaths { get; set; } = new();
+        public List<string> History { get; set; } = new();
+        public int HistoryIndex { get; set; } = -1;
+        public string? SortProperty { get; set; }
+        public int? SortOrder { get; set; }
+        public double ScrollPosition { get; set; }
+    }
+
+    private async Task SaveStateAsync()
+    {
+        try
+        {
+            var sortCol = _dataGrid?.ColumnsCollection?.FirstOrDefault(c => c.GetSortOrder() != null);
+            double scrollPos = 0;
+            if (_viewMode == "List")
+            {
+               try { scrollPos = await JS.InvokeAsync<double>("eval", "document.querySelector('.rz-data-grid-data')?.scrollTop || 0"); } catch { }
+            }
+            else 
+            {
+               try { scrollPos = await JS.InvokeAsync<double>("eval", "document.getElementById('file-container')?.scrollTop || 0"); } catch { }
+            }
+
+            var state = new ExplorerState
+            {
+                LastPath = _currentPath,
+                ViewMode = _viewMode,
+                ShowHidden = _showHidden,
+                SelectedPaths = _selectedItems.Select(i => i.FullPath).ToList(),
+                History = _history,
+                HistoryIndex = _historyIndex,
+                SortProperty = sortCol?.Property,
+                SortOrder = sortCol?.GetSortOrder() != null ? (int)sortCol.GetSortOrder() : null,
+                ScrollPosition = scrollPos
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(state);
+            await JS.InvokeVoidAsync("sessionStorage.setItem", "fileExplorerState", json);
+            await JS.InvokeVoidAsync("sessionStorage.setItem", "lastPath", _currentPath);
+        }
+        catch { }
+    }
+
+    private async Task OnTreeSelectionChange(TreeEventArgs args)
+    {
+        var nodeObj = ExtractNodeObject(args.Value);
+        if (nodeObj != null)
+        {
+            await LoadDirectoryAsync(nodeObj.Path);
+        }
+    }
+
+    private async Task LoadChildren(TreeExpandEventArgs args)
+    {
+        var nodeObj = ExtractNodeObject(args.Value);
+        if (nodeObj != null)
+        {
+            try
+            {
+                var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(nodeObj.Path)}&showHidden={_showHidden}";
+                var response = await Http.GetAsync(uri);
+                if (response.IsSuccessStatusCode)
+                {
+                    var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>();
+                    var items = result?.Items;
+                    if (items != null)
+                    {
+                        var directories = items.Where(i => i.Type == FileSystemItemType.Folder).OrderBy(i => i.Name).ToList();
+                        foreach(var d in directories) 
+                        {
+                            _loadedTreeItemMap[d.FullPath] = d;
+                        }
+                        args.Children.Data = directories;
+                        args.Children.TextProperty = "Name";
+                        args.Children.HasChildren = (item) => true;
+                        args.Children.Template = args.Children.Template; 
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to load children for tree node {Path}", nodeObj.Path);
+            }
+        }
+    }
+
+    private async Task OnRowDoubleClick(DataGridRowMouseEventArgs<FileSystemItem> args)
+    {
+        if (args.Data?.Type == FileSystemItemType.Folder)
+        {
+            await LoadDirectoryAsync(args.Data.FullPath!);
+        }
+        else if (args.Data?.Type == FileSystemItemType.File)
+        {
+            await PreviewOrDownload(args.Data);
+        }
+    }
+
+    private async Task OnAddressKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await NavigateToAddress();
+        }
+    }
+
+    private async Task OnSearchKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_searchInput) && !string.IsNullOrEmpty(_currentPath))
+        {
+            await PerformSearch();
+        }
+    }
+
+    private async Task PerformSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_searchInput) || string.IsNullOrEmpty(_currentPath)) return;
+
+        CancelSearch();
+
+        var cts = new System.Threading.CancellationTokenSource();
+        _searchCts = cts;
+        var token = cts.Token;
+
+        _isLoading = true;
+        _isSearching = true;
+        _isSearchResults = true;
+        _errorMessage = null;
+        _currentItems = new List<FileSystemItem>();
+        ClearSelection();
+        StateHasChanged();
+
+        try
+        {
+            var uri = $"api/fileexplorer/search?path={Uri.EscapeDataString(_currentPath)}&q={Uri.EscapeDataString(_searchInput)}&showHidden={_showHidden}&recurse={_searchSubfolders}";
+            var response = await Http.GetAsync(uri, token);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>(options, cancellationToken: token);
+                var deserialized = result?.Items;
+                _currentItems = deserialized?.OrderBy(i => i.Type != FileSystemItemType.Folder).ThenBy(i => i.Name).ToList();
+            }
+            else
+            {
+                if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    _errorMessage = "Access Denied: You are not authorized to access this directory.";
+                else if ((int)response.StatusCode == 499)
+                {
+                    if (!string.IsNullOrEmpty(_currentPath)) {
+                        await LoadDirectoryAsync(_currentPath);
+                        _errorMessage = "Search cancelled.";
+                    }
+                }
+                else
+                    _errorMessage = $"Error: {response.StatusCode}";
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            if (!string.IsNullOrEmpty(_currentPath)) {
+                await LoadDirectoryAsync(_currentPath);
+                _errorMessage = "Search cancelled.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to perform search in {Path}", _currentPath);
+            _errorMessage = "An unexpected error occurred while searching.";
+        }
+        finally
+        {
+            _isLoading = false;
+            _isSearching = false;
+            
+            if (_searchCts == cts)
+            {
+                _searchCts.Dispose();
+                _searchCts = null;
+            }
+            
+            StateHasChanged();
+        }
+    }
+
+    private void CancelSearch()
+    {
+        if (_searchCts != null)
+        {
+            _searchCts.Cancel();
+            _searchCts.Dispose();
+            _searchCts = null;
+        }
+        _isSearching = false;
+    }
+
+    private async Task NavigateToAddress()
+    {
+        if (!string.IsNullOrWhiteSpace(_addressInput))
+        {
+            await LoadDirectoryAsync(_addressInput);
+        }
+    }
+
+    private async Task NavigateUp()
+    {
+        if (!string.IsNullOrEmpty(_currentPath))
+        {
+            try
+            {
+                var parentPath = GetDirectoryName(_currentPath);
+                if (string.IsNullOrEmpty(parentPath) || parentPath == _currentPath)
+                {
+                    _currentPath = null;
+                    _currentItems = null;
+                    _addressInput = "";
+                    UpdateBreadcrumbs();
+                    return;
+                }
+                await LoadDirectoryAsync(parentPath);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to navigate up from {Path}", _currentPath);
+            }
+            
+            // Fallback if unable to determine parent
+            _currentPath = null;
+            _currentItems = null;
+            _addressInput = "";
+            UpdateBreadcrumbs();
+        }
+    }
+
+    private async Task NavigateBack()
+    {
+        if (_historyIndex > 0)
+        {
+            _historyIndex--;
+            await LoadDirectoryInternalAsync(_history[_historyIndex], false);
+        }
+    }
+
+    private async Task NavigateForward()
+    {
+        if (_historyIndex >= 0 && _historyIndex < _history.Count - 1)
+        {
+            _historyIndex++;
+            await LoadDirectoryInternalAsync(_history[_historyIndex], false);
+        }
+    }
+
+    private async Task LoadDirectoryAsync(string path)
+    {
+        await LoadDirectoryInternalAsync(path, true);
+    }
+
+    private async Task LoadDirectoryInternalAsync(string path, bool addToHistory)
+    {
+        CancelSearch();
+        _isSearchResults = false;
+        _searchInput = "";
+        
+        _isLoading = true;
+        _errorMessage = null;
+        ClearSelection();
+        StateHasChanged();
+
+        try
+        {
+            HttpResponseMessage response;
+            if (path.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase))
+            {
+                response = await Http.GetAsync("api/fileexplorer/recyclebin");
+            }
+            else
+            {
+                var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(path)}&showHidden={_showHidden}";
+                response = await Http.GetAsync(uri);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                if (addToHistory)
+                {
+                    if (_historyIndex < _history.Count - 1)
+                    {
+                        _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
+                    }
+                    if (_history.Count == 0 || _history.Last() != path)
+                    {
+                        _history.Add(path);
+                        _historyIndex = _history.Count - 1;
+                    }
+                }
+                
+                var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                if (path.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase))
+                {
+                    var rbItems = await response.Content.ReadFromJsonAsync<IEnumerable<RecycleBinItem>>(options);
+                    _currentItems = rbItems?.Select(i => new FileSystemItem(
+                        i.Name,
+                        i.Id,
+                        FileSystemItemType.File, // Approximation, not great, we'll see
+                        i.Size,
+                        i.DeletionTime,
+                        false,
+                        i.OriginalPath,
+                        i.DeletionTime
+                    )).ToList();
+                }
+                else
+                {
+                    var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>(options);
+                    var deserialized = result?.Items;
+                    _currentItems = deserialized?.OrderBy(i => i.Type != FileSystemItemType.Folder).ThenBy(i => i.Name).ToList();
+                }
+                _currentPath = path;
+                _addressInput = path;
+                _needsKeyboardRegistration = true;
+                UpdateBreadcrumbs();
+                
+                await SaveStateAsync();
+
+                await SyncTreeSelectionAsync(path);
+
+                if (_postLoadSelectionPaths.Any() && _currentItems != null)
+                {
+                    _selectedItems = _currentItems
+                        .Where(i => _postLoadSelectionPaths.Any(p => 
+                            string.Equals(p, i.FullPath, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    
+                    if (_selectedItems.Any())
+                    {
+                        _focusedItem = _selectedItems.First();
+                        _lastClickedItem = _focusedItem;
+                    }
+                    _postLoadSelectionPaths.Clear();
+                }
+
+                if (_pendingSortProperty != null && _currentItems != null)
+                {
+                    var prop = typeof(FileSystemItem).GetProperty(_pendingSortProperty);
+                    if (prop != null)
+                    {
+                        if (_pendingSortOrder == 1)
+                            _currentItems = _currentItems.OrderBy(x => prop.GetValue(x)).ToList();
+                        else if (_pendingSortOrder == 2)
+                            _currentItems = _currentItems.OrderByDescending(x => prop.GetValue(x)).ToList();
+                        
+                        try {
+                            if (_dataGrid != null)
+                            {
+                                var col = _dataGrid.ColumnsCollection.FirstOrDefault(c => c.Property == _pendingSortProperty);
+                                if (col != null)
+                                {
+                                    col.SortOrder = _pendingSortOrder == 1 ? Radzen.SortOrder.Ascending : Radzen.SortOrder.Descending;
+                                }
+                            }
+                        } catch { }
+                    }
+                    _pendingSortProperty = null;
+                    _pendingSortOrder = null;
+                }
+
+                if (_pendingScrollPosition.HasValue && _pendingScrollPosition.Value > 0)
+                {
+                    var scrollPos = _pendingScrollPosition.Value;
+                    _pendingScrollPosition = null;
+                    
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(150);
+                        try
+                        {
+                            if (_viewMode == "List")
+                            {
+                                await JS.InvokeVoidAsync("eval", $"var el = document.querySelector('.rz-data-grid-data'); if (el) el.scrollTop = {scrollPos};");
+                            }
+                            else
+                            {
+                                await JS.InvokeVoidAsync("eval", $"var el = document.getElementById('file-container'); if (el) el.scrollTop = {scrollPos};");
+                            }
+                        }
+                        catch { }
+                    });
+                }
+            }
+            else
+            {
+                if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    _errorMessage = "Access Denied: You are not authorized to access this directory.";
+                else if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    _errorMessage = "Directory not found.";
+                else if (response.StatusCode == System.Net.HttpStatusCode.NotImplemented && path.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase))
+                    _errorMessage = "Recycle Bin is unsupported or unavailable on this system.";
+                else
+                    _errorMessage = $"Error: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load directory {Path}", path);
+            _errorMessage = "An unexpected error occurred while loading the directory.";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SyncTreeSelectionAsync(string path)
+    {
+        if (_roots == null) return;
+
+        if (path.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedTreeItem = _roots.FirstOrDefault(r => r.RootDirectory == "::RecycleBin::");
+            return;
+        }
+
+        char separator = path.Contains('\\') ? '\\' : '/';
+
+        // Find the matching root drive
+        DriveItem? rootMatch = null;
+        foreach (var root in _roots)
+        {
+            if (root.RootDirectory == "::RecycleBin::") continue;
+            string rootPath = root.RootDirectory.TrimEnd('/', '\\') + separator;
+            string testPath = path.TrimEnd('/', '\\') + separator;
+            if (testPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                rootMatch = root;
+                break;
+            }
+        }
+
+        if (rootMatch == null) return;
+
+        // Build the list of intermediate directories from root to target
+        string rootDir = rootMatch.RootDirectory.TrimEnd('/', '\\');
+        string targetDir = path.TrimEnd('/', '\\');
+
+        if (string.Equals(rootDir, targetDir, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedTreeItem = rootMatch;
+            return;
+        }
+
+        // Split into segments after the root
+        string relative = targetDir.Substring(rootDir.Length).TrimStart('/', '\\');
+        var segments = relative.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+
+        // Walk down the tree, expanding and loading children at each level
+        _expandedNodes.Add(rootMatch);
+
+        string currentPath = rootDir;
+        object? currentNode = rootMatch;
+
+        foreach (var segment in segments)
+        {
+            currentPath = currentPath.TrimEnd('/', '\\') + separator + segment;
+
+            // Load children of current node if not already loaded
+            if (!_loadedTreeItemMap.ContainsKey(currentPath))
+            {
+                var parentPath = ExtractNodeObject(currentNode)?.Path;
+                if (parentPath != null)
+                {
+                    try
+                    {
+                        var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(parentPath)}&showHidden={_showHidden}";
+                        var response = await Http.GetAsync(uri);
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>();
+                            var items = result?.Items;
+                            if (items != null)
+                            {
+                                var directories = items.Where(i => i.Type == FileSystemItemType.Folder).OrderBy(i => i.Name).ToList();
+                                foreach (var d in directories)
+                                {
+                                    _loadedTreeItemMap[d.FullPath] = d;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // Find the child matching this segment
+            if (_loadedTreeItemMap.TryGetValue(currentPath, out var childItem))
+            {
+                _expandedNodes.Add(childItem);
+                currentNode = childItem;
+            }
+            else
+            {
+                // Can't go deeper, select what we have
+                break;
+            }
+        }
+
+        _selectedTreeItem = currentNode;
+        StateHasChanged();
+    }
+
+    private void UpdateBreadcrumbs()
+    {
+        _breadcrumbs.Clear();
+        if (string.IsNullOrEmpty(_currentPath)) return;
+
+        char separator = _currentPath!.Contains('\\') ? '\\' : '/';
+        var parts = _currentPath.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+        
+        var sb = new System.Text.StringBuilder();
+        
+        if (_currentPath.StartsWith("/"))
+        {
+            sb.Append('/');
+        }
+        
+        foreach (var part in parts)
+        {
+            sb.Append(part);
+            sb.Append(separator);
+            _breadcrumbs.Add((part, sb.ToString()));
+        }
+    }
+
+    private static readonly string[] _sizes = { "B", "KB", "MB", "GB", "TB" };
+
+    private string FormatSize(long bytes)
+    {
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < _sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {_sizes[order]}";
+    }
+
+    private bool IsRecycleBin => _currentPath?.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase) == true;
+    private bool CanRestore => IsRecycleBin && (_selectedItems.Count > 0 || _focusedItem != null);
+    
+    private async Task RestoreSelected()
+    {
+        if (!CanRestore) return;
+        
+        var itemsToRestore = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            int successCount = 0;
+            int failedCount = 0;
+            foreach (var item in itemsToRestore)
+            {
+                var response = await Http.PostAsync($"api/fileexplorer/recyclebin/restore?id={Uri.EscapeDataString(item.FullPath)}", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    successCount++;
+                }
+                else
+                {
+                    failedCount++;
+                }
+            }
+            
+            if (successCount > 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Restored", $"Successfully restored {successCount} item(s).");
+                await LoadDirectoryAsync(_currentPath!);
+            }
+            if (failedCount > 0)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Restore Failed", $"{failedCount} item(s) failed.");
+            }
+            else if (successCount == 0)
+            {
+                 NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to restore item(s).");
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EmptyRecycleBin()
+    {
+        if (!IsRecycleBin) return;
+        
+        var options = new ConfirmOptions { OkButtonText = "Empty", CancelButtonText = "Cancel" };
+        var confirmed = await DialogService.Confirm("Are you sure you want to permanently delete all items in the Recycle Bin?", "Empty Recycle Bin", options);
+
+        if (confirmed == true)
+        {
+            var response = await Http.PostAsync("api/fileexplorer/recyclebin/empty", null);
+            if (response.IsSuccessStatusCode)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Emptied", "Recycle Bin is now empty.");
+                await LoadDirectoryAsync(_currentPath!);
+            }
+            else
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to empty Recycle Bin.");
+            }
+        }
+    }
+
+    private bool CanRename => _selectedItems.Count == 1 || (_selectedItems.Count == 0 && _focusedItem != null);
+    private bool CanDelete => _selectedItems.Count > 0 || _focusedItem != null;
+    private bool CanCompress => _selectedItems.Count > 0 || _focusedItem != null;
+    private bool CanExtract => GetSingleZipItem() != null;
+
+    private FileSystemItem? GetSingleZipItem()
+    {
+        if (_selectedItems.Count == 1 && _selectedItems[0].Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return _selectedItems[0];
+        if (_selectedItems.Count == 0 && _focusedItem != null && _focusedItem.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return _focusedItem;
+        return null;
+    }
+
+    private async Task CreateFolderDialog()
+    {
+        if (string.IsNullOrEmpty(_currentPath)) return;
+
+        var result = await DialogService.OpenAsync("New Folder", ds =>
+            @<RadzenStack Gap="1.5rem">
+                <p>Enter the new folder name:</p>
+                <RadzenTextBox Name="FolderName" Placeholder="New Folder" style="width: 100%;" @bind-Value="@_newFolderName" />
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Text="Create" Click="@(() => ds.Close(_newFolderName))" Style="width: 120px" />
+                    <RadzenButton Text="Cancel" Click="@(() => ds.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 120px" />
+                </RadzenStack>
+            </RadzenStack>);
+
+        if (result is string fName && !string.IsNullOrWhiteSpace(fName))
+        {
+            await CreateFolderAsync(fName);
+        }
+        
+        _newFolderName = ""; // Reset
+    }
+
+    private string _newFolderName = "";
+    private string _renameItemName = "";
+
+    private async Task CreateFolderAsync(string folderName)
+    {
+        try
+        {
+            var uri = $"api/fileexplorer/create-folder?parentPath={Uri.EscapeDataString(_currentPath!)}&folderName={Uri.EscapeDataString(folderName)}";
+            var response = await Http.PostAsync(uri, null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Folder Created", $"'{folderName}' created successfully.");
+                await LoadDirectoryAsync(_currentPath!);
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<Result<FileSystemItem>>();
+                NotificationService.Notify(NotificationSeverity.Error, "Error", error?.ErrorMessage ?? "Failed to create folder.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+        }
+    }
+
+    private async Task RenameDialog()
+    {
+        if (!CanRename) return;
+        
+        var targetItem = _selectedItems.Count == 1 ? _selectedItems[0] : _focusedItem!;
+        _renameItemName = targetItem.Name;
+
+        var result = await DialogService.OpenAsync("Rename", ds =>
+            @<RadzenStack Gap="1.5rem">
+                <p>Rename item <strong>@targetItem.Name</strong>:</p>
+                <RadzenTextBox Name="NewName" Placeholder="New name" style="width: 100%;" @bind-Value="@_renameItemName" />
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Text="Rename" Click="@(() => ds.Close(_renameItemName))" Style="width: 120px" />
+                    <RadzenButton Text="Cancel" Click="@(() => ds.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 120px" />
+                </RadzenStack>
+            </RadzenStack>);
+
+        if (result is string nName && !string.IsNullOrWhiteSpace(nName) && nName != targetItem.Name)
+        {
+            await RenameAsync(targetItem.FullPath, nName);
+        }
+    }
+
+    private async Task RenameAsync(string oldPath, string newName)
+    {
+        try
+        {
+            var uri = $"api/fileexplorer/rename?path={Uri.EscapeDataString(oldPath)}&newName={Uri.EscapeDataString(newName)}";
+            var response = await Http.PutAsync(uri, null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                NotificationService.Notify(NotificationSeverity.Success, "Item Renamed", $"Renamed to '{newName}'.");
+                await LoadDirectoryAsync(_currentPath!);
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<Result<FileSystemItem>>();
+                NotificationService.Notify(NotificationSeverity.Error, "Error", error?.ErrorMessage ?? "Failed to rename item.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+        }
+    }
+
+    private async Task CompressSelected()
+    {
+        if (!CanCompress) return;
+
+        var itemsToCompress = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        var defaultZipName = itemsToCompress.Count == 1 ? $"{itemsToCompress[0].Name}.zip" : "Archive.zip";
+        var zipNameInput = "";
+
+        var result = await DialogService.OpenAsync("Compress to ZIP", ds =>
+            @<RadzenStack Gap="1.5rem">
+                <p>Enter the name of the ZIP file:</p>
+                <RadzenTextBox Name="ZipName" Placeholder="@defaultZipName" style="width: 100%;" @bind-Value="@zipNameInput" />
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Text="Compress" Click="@(() => ds.Close(string.IsNullOrWhiteSpace(zipNameInput) ? defaultZipName : zipNameInput))" Style="width: 120px" />
+                    <RadzenButton Text="Cancel" Click="@(() => ds.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 120px" />
+                </RadzenStack>
+            </RadzenStack>);
+
+        if (result is string zName && !string.IsNullOrWhiteSpace(zName))
+        {
+            if (!zName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                zName += ".zip";
+
+            var destZipPath = CombinePaths(_currentPath!, zName);
+            var request = new CompressRequest
+            {
+                SourcePaths = itemsToCompress.Select(i => i.FullPath),
+                DestinationZipPath = destZipPath
+            };
+
+            _isLoading = true;
+            StateHasChanged();
+            try
+            {
+                var response = await Http.PostAsJsonAsync("api/fileexplorer/compress", request);
+                if (response.IsSuccessStatusCode)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Compressed", $"Successfully created '{zName}'.");
+                    await LoadDirectoryAsync(_currentPath!);
+                }
+                else
+                {
+                    var error = await response.Content.ReadFromJsonAsync<Result>();
+                    NotificationService.Notify(NotificationSeverity.Error, "Error", error?.ErrorMessage ?? "Failed to compress files.");
+                }
+            }
+            catch (Exception ex)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+            }
+            finally
+            {
+                _isLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task ExtractSelected(FileSystemItem? zipItem)
+    {
+        if (zipItem == null) return;
+
+        var defaultChildFolder = GetFileNameWithoutExtension(zipItem.Name);
+        var destFolderPathInput = CombinePaths(GetDirectoryName(zipItem.FullPath) ?? _currentPath!, defaultChildFolder);
+
+        var result = await DialogService.OpenAsync("Extract All", ds =>
+            @<RadzenStack Gap="1.5rem">
+                <p>Extract to folder:</p>
+                <div class="d-flex align-items-center">
+                    <RadzenTextBox Name="DestFolderPath" style="flex: 1" @bind-Value="@destFolderPathInput" />
+                    <RadzenButton Icon="folder" Click="@(async () => {
+                        var parameters = new Dictionary<string, object?> { { "InitialPath", _currentPath ?? "" } };
+                        var picked = await DialogService.OpenAsync<WebFileExplorer.Client.Components.FolderPickerDialog>("Select Destination", parameters, new DialogOptions { Width = "80vw", Height = "80vh", Resizable = true, Draggable = true });
+                        if (picked is string selectedFolder)
+                        {
+                            destFolderPathInput = CombinePaths(selectedFolder, defaultChildFolder);
+                            ds.Refresh();
+                            StateHasChanged();
+                        }
+                    })" Class="rz-ml-2" title="Browse..." />
+                </div>
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+                    <RadzenButton Text="Extract" Click="@(() => ds.Close(destFolderPathInput))" Style="width: 120px" />
+                    <RadzenButton Text="Cancel" Click="@(() => ds.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 120px" />
+                </RadzenStack>
+            </RadzenStack>);
+
+        if (result is string destPath && !string.IsNullOrWhiteSpace(destPath))
+        {
+            await PerformExtract(zipItem.FullPath, destPath, ConflictResolution.None);
+        }
+    }
+
+    private async Task PerformExtract(string zipPath, string destPath, ConflictResolution resolution)
+    {
+            var request = new ExtractRequest
+            {
+                ZipPath = zipPath,
+                DestinationFolderPath = destPath,
+                Resolution = resolution
+            };
+
+            _isLoading = true;
+            StateHasChanged();
+            try
+            {
+                var response = await Http.PostAsJsonAsync("api/fileexplorer/extract", request);
+                if (response.IsSuccessStatusCode)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Extracted", $"Successfully extracted.");
+                    await LoadDirectoryAsync(_currentPath!);
+                }
+                else
+                {
+                    var error = await response.Content.ReadFromJsonAsync<Result>();
+                    var errMsg = error?.ErrorMessage ?? "Failed to extract zip file.";
+
+                    if (resolution == ConflictResolution.None && errMsg.Contains("already exist"))
+                    {
+                        _isLoading = false;
+                        StateHasChanged();
+                        var chosenResolution = await ShowConflictResolutionDialog();
+                        if (chosenResolution.HasValue && chosenResolution.Value != ConflictResolution.None)
+                        {
+                            await PerformExtract(zipPath, destPath, chosenResolution.Value);
+                        }
+                        return;
+                    }
+
+                    NotificationService.Notify(NotificationSeverity.Error, "Error", errMsg);
+                }
+            }
+            catch (Exception ex)
+            {
+                NotificationService.Notify(NotificationSeverity.Error, "Error", ex.Message);
+            }
+            finally
+            {
+                _isLoading = false;
+                StateHasChanged();
+            }
+    }
+
+    private async Task DeleteSelected(bool permanent = false)
+    {
+        if (!CanDelete) return;
+
+        var itemsToDelete = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        
+        var title = permanent ? "Permanently Delete Items" : "Delete Items";
+        var confirmMsg = "";
+        
+        if (permanent || IsRecycleBin)
+        {
+            var word = IsRecycleBin ? "permanently delete" : "delete";
+            confirmMsg = itemsToDelete.Count == 1 
+                ? $"Are you sure you want to {word} '{itemsToDelete[0].Name}'?" 
+                : $"Are you sure you want to {word} {itemsToDelete.Count} items?";
+        }
+        else
+        {
+            confirmMsg = itemsToDelete.Count == 1 
+                ? $"Are you sure you want to move '{itemsToDelete[0].Name}' to the Recycle Bin?" 
+                : $"Are you sure you want to move {itemsToDelete.Count} items to the Recycle Bin?";
+        }
+
+        var options = new ConfirmOptions { OkButtonText = "Delete", CancelButtonText = "Cancel" };
+        var confirmed = await DialogService.Confirm(confirmMsg, title, options);
+
+        if (confirmed == true)
+        {
+            _isLoading = true;
+            StateHasChanged();
+
+            try
+            {
+                int successCount = 0;
+                int failedCount = 0;
+                foreach (var item in itemsToDelete)
+                {
+                    var success = await DeleteAsync(item.FullPath, permanent || IsRecycleBin);
+                    if (success) successCount++;
+                    else failedCount++;
+                }
+
+                if (successCount > 0)
+                {
+                    NotificationService.Notify(NotificationSeverity.Success, "Deleted", $"Successfully deleted {successCount} item(s).");
+                    await LoadDirectoryAsync(_currentPath!);
+                }
+                if (failedCount > 0)
+                {
+                    NotificationService.Notify(NotificationSeverity.Error, "Delete Failed", $"{failedCount} item(s) failed.");
+                }
+            }
+            finally
+            {
+                _isLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task<bool> DeleteAsync(string path, bool permanent)
+    {
+        try
+        {
+            HttpResponseMessage response;
+            if (IsRecycleBin)
+            {
+                response = await Http.PostAsync($"api/fileexplorer/recyclebin/delete?id={Uri.EscapeDataString(path)}", null);
+            }
+            else
+            {
+                var uri = $"api/fileexplorer/delete?path={Uri.EscapeDataString(path)}&permanent={permanent.ToString().ToLower()}";
+                response = await Http.DeleteAsync(uri);
+            }
+            
+            if (response.IsSuccessStatusCode)
+            {
+                return true;
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<Result>();
+                NotificationService.Notify(NotificationSeverity.Error, "Delete Failed", error?.ErrorMessage ?? $"Failed to delete '{GetFileName(path)}'.");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Notify(NotificationSeverity.Error, "Delete Failed", ex.Message);
+            return false;
+        }
+    }
+
+        private bool CanCut => _selectedItems.Any();
+    private bool CanCopy => _selectedItems.Any();
+    private bool CanPaste => !string.IsNullOrEmpty(_currentPath) && Clipboard.Items.Any();
+
+    private bool IsGhosted(FileSystemItem item) 
+    {
+        bool isClipboardCut = Clipboard.IsCut && Clipboard.Items.Any(p => string.Equals(p, item.FullPath, StringComparison.OrdinalIgnoreCase));
+        bool isDragged = _draggedItems.Any(p => string.Equals(p, item.FullPath, StringComparison.OrdinalIgnoreCase));
+        return isClipboardCut || isDragged;
+    }
+
+    private void CutSelected() => Clipboard.SetState(true, _selectedItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
+    private void CopySelected() => Clipboard.SetState(false, _selectedItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
+
+    private async Task PasteItems()
+    {
+        await PerformPasteItems(_currentPath ?? string.Empty, Clipboard.IsCut, Clipboard.Items, ConflictResolution.None);
+    }
+
+    private async Task PerformPasteItems(string destinationPath, bool isCut, IEnumerable<string> sourcePaths, ConflictResolution resolution)
+    {
+        if (!sourcePaths.Any() || string.IsNullOrEmpty(destinationPath)) return;
+        
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new ClipboardOperationRequest { 
+                Items = sourcePaths, 
+                DestinationPath = destinationPath, 
+                Overwrite = resolution == ConflictResolution.Overwrite,
+                Resolution = resolution 
+            };
+            var endpoint = isCut ? "api/fileexplorer/move" : "api/fileexplorer/copy";
+            
+            var response = await Http.PostAsJsonAsync(endpoint, request);
+            var result = await response.Content.ReadFromJsonAsync<Result>();
+
+            if (response.IsSuccessStatusCode && result != null && result.IsSuccess)
+            {
+                if (isCut) Clipboard.Clear();
+                
+                // Re-load the directory and optionally select newly pasted items
+                _postLoadSelectionPaths = sourcePaths.Select(p => 
+                    CombinePaths(destinationPath, GetFileName(p))).ToList();
+                    
+                await LoadDirectoryAsync(_currentPath ?? string.Empty);
+            }
+            else
+            {
+                var errMsg = result?.ErrorMessage ?? "Operation failed.";
+                if (result?.Errors != null && result.Errors.Any())
+                {
+                    errMsg += $" ({result.FailedCount} failed)";
+                }
+
+                if (resolution == ConflictResolution.None && errMsg.Contains("already exists"))
+                {
+                    _isLoading = false;
+                    StateHasChanged();
+                    // Call dialog before reloading
+                    var chosenResolution = await ShowConflictResolutionDialog();
+                    if (chosenResolution != null)
+                    {
+                        // We must reset isLoading while waiting for the nested task, or recursive call is sufficient. Wait, recursive call will handle it, but we already have a finally.
+                        // Actually, we should just let the nested method's finally handle its own state, but ours will run too. It's fine.
+                        await PerformPasteItems(destinationPath, isCut, sourcePaths, chosenResolution.Value);
+                        return;
+                    }
+                }
+                else
+                {
+                    _errorMessage = errMsg;
+                    NotificationService.Notify(NotificationSeverity.Error, "Operation Failed", _errorMessage, 6000D);
+                    if (result?.Errors != null && result.Errors.Any())
+                    {
+                        var limitedErrors = result.Errors.Take(3).Select(e => e.Value).ToList();
+                        var errorDetails = string.Join("\n", limitedErrors) + (result.Errors.Count > 3 ? $"\n...and {result.Errors.Count - 3} more." : "");
+                        NotificationService.Notify(NotificationSeverity.Error, "Error Details", errorDetails, 10000D);
+                    }
+                }
+                if (result?.SuccessfulCount > 0) await LoadDirectoryAsync(_currentPath ?? string.Empty);
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<ConflictResolution?> ShowConflictResolutionDialog()
+    {
+        var result = await DialogService.OpenAsync("File Conflict", ds =>
+            @<RadzenStack Gap="1.5rem">
+                <p>Destination item already exists. How do you want to proceed?</p>
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.Center">
+                    <RadzenButton Text="Overwrite" Click="@(() => ds.Close(ConflictResolution.Overwrite))" ButtonStyle="ButtonStyle.Primary" Style="width: 100px" />
+                    <RadzenButton Text="Merge" Click="@(() => ds.Close(ConflictResolution.Merge))" ButtonStyle="ButtonStyle.Secondary" Style="width: 100px" />
+                    <RadzenButton Text="Skip" Click="@(() => ds.Close(ConflictResolution.Skip))" ButtonStyle="ButtonStyle.Warning" Style="width: 100px" />
+                    <RadzenButton Text="Cancel" Click="@(() => ds.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 100px" />
+                </RadzenStack>
+            </RadzenStack>);
+
+        return result as ConflictResolution?;
+    }
+
+    private void OnDragStart(DragEventArgs e, FileSystemItem item)
+    {
+        if (!_selectedItems.Contains(item))
+        {
+            _selectedItems.Clear();
+            _selectedItems.Add(item);
+        }
+        _draggedItems = _selectedItems.Select(x => x.FullPath).ToList();
+    }
+
+    private void OnDragEnd()
+    {
+        _draggedItems.Clear();
+    }
+
+    private async Task OnDrop(DragEventArgs e, FileSystemItem targetItem)
+    {
+        if (targetItem.Type != FileSystemItemType.Folder || !_draggedItems.Any())
+        {
+            _draggedItems.Clear();
+            return;
+        }
+
+        if (_draggedItems.Any(p => string.Equals(p, targetItem.FullPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            _draggedItems.Clear();
+            return;
+        }
+
+        var itemsToMove = _draggedItems.ToList();
+        _draggedItems.Clear();
+        await PerformPasteItems(targetItem.FullPath, true, itemsToMove, ConflictResolution.None);
+    }
+
+    protected override void OnInitialized()
+    {
+        Clipboard.OnChange += StateHasChanged;
+        base.OnInitialized();
+    }
+
+    public void Dispose()
+    {
+        CancelSearch();
+        Clipboard.OnChange -= StateHasChanged;
+    }
+
+    private void ClearSelection()
+    {
+        _selectedItems.Clear();
+        _focusedItem = null;
+        _lastClickedItem = null;
+    }
+
+    private async Task OnShowHiddenChanged(bool value)
+    {
+        _showHidden = value;
+        await SaveStateAsync();
+        if (!string.IsNullOrEmpty(_currentPath))
+        {
+            await LoadDirectoryAsync(_currentPath);
+        }
+    }
+
+    private async Task OnViewModeChanged(string mode)
+    {
+        _viewMode = mode;
+        await SaveStateAsync();
+    }
+
+    private void OnRowSelect(FileSystemItem item)
+    {
+        _focusedItem = item;
+        _lastClickedItem = item;
+    }
+
+    private async Task OnItemDoubleClick(FileSystemItem item)
+    {
+        if (item.Type == FileSystemItemType.Folder)
+        {
+            await LoadDirectoryAsync(item.FullPath);
+        }
+        else if (item.Type == FileSystemItemType.File)
+        {
+            await PreviewOrDownload(item);
+        }
+    }
+
+    private static readonly HashSet<string> _previewExtensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".txt", ".json", ".cs", ".md", ".xml", ".html", ".js", ".css", ".log", ".csv", ".ini", ".conf", ".yml", ".yaml" };
+
+    private async Task PreviewOrDownload(FileSystemItem item)
+    {
+        var ext = GetExtension(item.Name);
+        
+        if (_previewExtensions.Contains(ext))
+        {
+            await ShowPreviewDialogAsync(item);
+        }
+        else
+        {
+            await DownloadFileAsync(item);
+        }
+    }
+
+    private async Task ShowPreviewDialogAsync(FileSystemItem item)
+    {
+        await DialogService.OpenAsync<PreviewDialog>($"Preview: {item.Name}",
+            new Dictionary<string, object> { { "FilePath", item.FullPath }, { "FileName", item.Name } },
+            new DialogOptions { Width = "80vw", Height = "80vh", Resizable = true, Draggable = true });
+    }
+
+    private async Task DownloadFileAsync(FileSystemItem item)
+    {
+        var uri = $"api/fileexplorer/download?path={Uri.EscapeDataString(item.FullPath)}";
+        await JS.InvokeVoidAsync("open", uri, "_blank");
+    }
+
+    private void OnItemClick(Microsoft.AspNetCore.Components.Web.MouseEventArgs args, FileSystemItem item)
+    {
+        _focusedItem = item;
+
+        if (_currentItems == null) return;
+        var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
+
+        if (args.CtrlKey)
+        {
+            if (_selectedItems.Contains(item))
+            {
+                _selectedItems.Remove(item);
+            }
+            else
+            {
+                _selectedItems.Add(item);
+            }
+        }
+        else if (args.ShiftKey && _lastClickedItem != null)
+        {
+            int start = itemsList.IndexOf(_lastClickedItem);
+            int end = itemsList.IndexOf(item);
+            if (start != -1 && end != -1)
+            {
+                int min = Math.Min(start, end);
+                int max = Math.Max(start, end);
+                _selectedItems.Clear();
+                for (int i = min; i <= max; i++)
+                {
+                    _selectedItems.Add(itemsList[i]);
+                }
+            }
+        }
+        else
+        {
+            _selectedItems.Clear();
+            _selectedItems.Add(item);
+            _lastClickedItem = item;
+        }
+    }
+
+    public class TreeNodeObj
+    {
+        public string Name { get; set; } = "";
+        public string Path { get; set; } = "";
+        public bool IsDrive { get; set; }
+        public List<TreeNodeObj> Children { get; set; } = new();
+        public bool ChildrenLoaded { get; set; }
+    }
+
+    private List<TreeNodeObj> _treeNodes = new();
+
+    private bool IsNodeExpanded(object data)
+    {
+        return _expandedNodes.Contains(data);
+    }
+
+    private async Task OnTreeExpand(TreeExpandEventArgs args)
+    {
+        _expandedNodes.Add(args.Value);
+        await LoadChildren(args);
+    }
+
+    private void OnTreeCollapse(TreeEventArgs args)
+    {
+        _expandedNodes.Remove(args.Value);
+    }
+
+    private TreeNodeObj? ExtractNodeObject(object obj)
+    {
+        if (obj == null) return null;
+        
+        var valType = obj.GetType();
+        var valProp = valType.GetProperty("Value");
+        var actualVal = valProp != null ? valProp.GetValue(obj) : obj;
+
+        if (actualVal is DriveItem drive)
+        {
+            return new TreeNodeObj { Name = drive.Name, Path = drive.RootDirectory, IsDrive = true };
+        }
+        else if (actualVal is FileSystemItem folder)
+        {
+            return new TreeNodeObj { Name = folder.Name, Path = folder.FullPath, IsDrive = false };
+        }
+        return null;
+    }
+
+    private void OnTreeContextMenu(Microsoft.AspNetCore.Components.Web.MouseEventArgs args, TreeNodeObj? nodeObj)
+    {
+        if (nodeObj == null) return;
+
+        ClearSelection();
+        
+        var menuItems = new List<ContextMenuItem>
+        {
+            new ContextMenuItem { Text = "Open", Value = "Open", Icon = "folder_open" }
+        };
+
+        if (!nodeObj.IsDrive)
+        {
+            menuItems.Add(new ContextMenuItem { Text = "Copy Path", Value = "CopyPath", Icon = "content_copy" });
+        }
+
+        if (CanPaste)
+        {
+            menuItems.Add(new ContextMenuItem { Text = "Paste", Value = "Paste", Icon = "content_paste" });
+        }
+
+        ContextMenuService.Open(args, menuItems, async (MenuItemEventArgs e) =>
+        {
+            try
+            {
+                var val = e.Value?.ToString();
+                switch (val)
+                {
+                    case "Open":
+                        await LoadDirectoryAsync(nodeObj.Path);
+                        break;
+                    case "CopyPath":
+                        await JS.InvokeVoidAsync("navigator.clipboard.writeText", nodeObj.Path);
+                        break;
+                    case "Paste":
+                        if (!string.IsNullOrEmpty(nodeObj.Path))
+                        {
+                            var oldPath = _currentPath;
+                            _currentPath = nodeObj.Path;
+                            await PasteItems();
+                            _currentPath = oldPath;
+                        }
+                        break;
+                }
+                ContextMenuService.Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error in context menu action.");
+            }
+        });
+    }
+
+    private void OnContainerContextMenu(Microsoft.AspNetCore.Components.Web.MouseEventArgs args)
+    {
+        // Use a generic context menu for the free space
+        ClearSelection();
+        
+        var menuItems = new List<ContextMenuItem>
+        {
+            new ContextMenuItem { Text = "Paste", Value = "Paste", Icon = "content_paste", Disabled = !CanPaste },
+            new ContextMenuItem { Text = "New Folder", Value = "NewFolder", Icon = "create_new_folder", Disabled = string.IsNullOrEmpty(_currentPath) }
+        };
+
+        ContextMenuService.Open(args, menuItems, async (MenuItemEventArgs e) =>
+        {
+            try
+            {
+                var val = e.Value?.ToString();
+                switch (val)
+                {
+                    case "Paste": await PasteItems(); break;
+                    case "NewFolder": await CreateFolderDialog(); break;
+                }
+                ContextMenuService.Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error executing context menu.");
+            }
+        });
+    }
+
+    private void OnRowRender(RowRenderEventArgs<FileSystemItem> args)
+    {
+        if (args.Data != null)
+        {
+            args.Attributes.Add("oncontextmenu", Microsoft.AspNetCore.Components.EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, e => OnContextMenu(e, args.Data)));
+            args.Attributes.Add("oncontextmenu:preventDefault", true);
+            args.Attributes.Add("oncontextmenu:stopPropagation", true);
+        }
+    }
+
+    private void OnContextMenu(Microsoft.AspNetCore.Components.Web.MouseEventArgs args, FileSystemItem item)
+    {
+        if (!_selectedItems.Contains(item))
+        {
+            _selectedItems.Clear();
+            _selectedItems.Add(item);
+            _focusedItem = item;
+            _lastClickedItem = item;
+            StateHasChanged();
+        }
+
+        var menuItems = new List<ContextMenuItem>
+        {
+            new ContextMenuItem { Text = "Open", Value = "Open", Icon = "open_in_new" },
+            new ContextMenuItem { Text = "Download", Value = "Download", Icon = "download", Disabled = item.Type == FileSystemItemType.Folder },
+            new ContextMenuItem { Text = "Preview", Value = "Preview", Icon = "visibility", Disabled = item.Type == FileSystemItemType.Folder },
+            new ContextMenuItem { Text = "Cut", Value = "Cut", Icon = "content_cut", Disabled = !CanCut },
+            new ContextMenuItem { Text = "Copy", Value = "Copy", Icon = "content_copy", Disabled = !CanCopy },
+            new ContextMenuItem { Text = "Paste", Value = "Paste", Icon = "content_paste", Disabled = !CanPaste },
+            new ContextMenuItem { Text = "Rename", Value = "Rename", Icon = "edit", Disabled = !CanRename },
+            new ContextMenuItem { Text = "Delete", Value = "Delete", Icon = "delete", Disabled = !CanDelete },
+            new ContextMenuItem { Text = "Compress to ZIP file", Value = "Compress", Icon = "folder_zip" },
+            new ContextMenuItem { Text = "Extract All", Value = "Extract", Icon = "unarchive", Disabled = !(item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) },
+            new ContextMenuItem { Text = "Properties", Value = "Properties", Icon = "info" }
+        };
+
+        ContextMenuService.Open(args, menuItems, async (MenuItemEventArgs e) =>
+        {
+            try
+            {
+                var val = e.Value?.ToString();
+                switch (val)
+                {
+                    case "Open": await OnItemDoubleClick(item); break;
+                    case "Download": await DownloadFileAsync(item); break;
+                    case "Preview": await ShowPreviewDialogAsync(item); break;
+                    case "Cut": CutSelected(); break;
+                    case "Copy": CopySelected(); break;
+                    case "Paste": await PasteItems(); break;
+                    case "Rename": await RenameDialog(); break;
+                    case "Delete": await DeleteSelected(false); break;
+                    case "Compress": await CompressSelected(); break;
+                    case "Extract": await ExtractSelected(item); break;
+                    case "Properties": await ShowPropertiesDialogAsync(item); break;
+                }
+                ContextMenuService.Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error executing context menu action");
+            }
+        });
+    }
+
+    private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args)
+    {
+        if (_currentItems == null || !_currentItems.Any()) return;
+
+        var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
+        
+        if (string.Equals(args.Key, "f5", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrEmpty(_currentPath)) {
+                await LoadDirectoryAsync(_currentPath);
+            }
+            return;
+        }
+
+        if (string.Equals(args.Key, "f2", StringComparison.OrdinalIgnoreCase))
+        {
+            await RenameDialog();
+            return;
+        }
+        
+        if (args.CtrlKey && string.Equals(args.Key, "c", StringComparison.OrdinalIgnoreCase))
+        {
+            CopySelected();
+            return;
+        }
+        
+        if (args.CtrlKey && string.Equals(args.Key, "x", StringComparison.OrdinalIgnoreCase))
+        {
+            CutSelected();
+            return;
+        }
+        
+        if (args.CtrlKey && string.Equals(args.Key, "v", StringComparison.OrdinalIgnoreCase))
+        {
+            await PasteItems();
+            return;
+        }
+
+        if (args.CtrlKey && args.ShiftKey && string.Equals(args.Key, "n", StringComparison.OrdinalIgnoreCase))
+        {
+            await CreateFolderDialog();
+            return;
+        }
+
+        if (args.AltKey && string.Equals(args.Key, "arrowleft", StringComparison.OrdinalIgnoreCase))
+        {
+            await NavigateBack();
+            return;
+        }
+
+        if (args.AltKey && string.Equals(args.Key, "arrowright", StringComparison.OrdinalIgnoreCase))
+        {
+            await NavigateForward();
+            return;
+        }
+
+        if (string.Equals(args.Key, "backspace", StringComparison.OrdinalIgnoreCase))
+        {
+            await NavigateBack();
+            return;
+        }
+
+        if (args.AltKey && string.Equals(args.Key, "arrowup", StringComparison.OrdinalIgnoreCase))
+        {
+            await NavigateUp();
+            return;
+        }
+
+        if ((args.ShiftKey && string.Equals(args.Key, "f10", StringComparison.OrdinalIgnoreCase)) ||
+            string.Equals(args.Key, "ContextMenu", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_focusedItem != null)
+            {
+                OnContextMenu(new Microsoft.AspNetCore.Components.Web.MouseEventArgs(), _focusedItem);
+            }
+            else
+            {
+                OnContainerContextMenu(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+            }
+            return;
+        }
+
+        if (args.Key == "Delete")
+        {
+            await DeleteSelected(args.ShiftKey);
+            return;
+        }
+        
+        if (args.Key == "Enter" && _focusedItem != null)
+        {
+            await OnItemDoubleClick(_focusedItem);
+            return;
+        }
+        
+        if (args.CtrlKey && string.Equals(args.Key, "a", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedItems.Clear();
+            if (_selectedItems is List<FileSystemItem> list)
+            {
+                list.AddRange(itemsList);
+            }
+            else
+            {
+                foreach (var item in itemsList)
+                {
+                    _selectedItems.Add(item);
+                }
+            }
+            return;
+        }
+
+        int columns = _viewMode == "Details" || _viewMode == "List" ? ColumnsDefaultList 
+            : (_viewMode == "SmallIcons" ? ColumnsSmallIcons 
+            : (_viewMode == "MediumIcons" ? ColumnsMediumIcons : ColumnsLargeIcons));
+        
+        if (args.Key is "ArrowUp" or "ArrowDown" or "ArrowLeft" or "ArrowRight" or "Home" or "End" or "PageUp" or "PageDown")
+        {
+            if (_focusedItem == null)
+            {
+                _focusedItem = itemsList.First();
+                if (!args.ShiftKey)
+                {
+                    _lastClickedItem = _focusedItem;
+                    _selectedItems.Clear();
+                    _selectedItems.Add(_focusedItem);
+                }
+            }
+            else
+            {
+                int currentIndex = itemsList.IndexOf(_focusedItem);
+                int nextIndex = currentIndex;
+
+                if (args.Key == "ArrowUp") nextIndex = Math.Max(0, currentIndex - columns);
+                if (args.Key == "ArrowDown") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + columns);
+                if (args.Key == "ArrowLeft") nextIndex = Math.Max(0, currentIndex - 1);
+                if (args.Key == "ArrowRight") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + 1);
+                if (args.Key == "Home") nextIndex = 0;
+                if (args.Key == "End") nextIndex = itemsList.Count - 1;
+                
+                // Roughly 5 rows per page skip
+                int pageSize = columns * 5;
+                if (args.Key == "PageUp") nextIndex = Math.Max(0, currentIndex - pageSize);
+                if (args.Key == "PageDown") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + pageSize);
+
+                if (nextIndex != currentIndex)
+                {
+                    _focusedItem = itemsList[nextIndex];
+
+                    if (args.ShiftKey)
+                    {
+                        if (_lastClickedItem == null) _lastClickedItem = itemsList[currentIndex];
+                        
+                        int start = itemsList.IndexOf(_lastClickedItem);
+                        int end = itemsList.IndexOf(_focusedItem);
+                        int min = Math.Min(start, end);
+                        int max = Math.Max(start, end);
+                        
+                        _selectedItems.Clear();
+                        for (int i = min; i <= max; i++)
+                        {
+                            _selectedItems.Add(itemsList[i]);
+                        }
+                    }
+                    else
+                    {
+                        _lastClickedItem = _focusedItem;
+                        _selectedItems.Clear();
+                        _selectedItems.Add(_focusedItem);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (args.Key.Length == 1 && !args.CtrlKey && !args.AltKey)
+        {
+            if ((DateTime.Now - _lastTypeTime).TotalMilliseconds > 1000)
+            {
+                _typeBuffer = "";
+            }
+            _typeBuffer += args.Key.ToLower();
+            _lastTypeTime = DateTime.Now;
+
+            var match = itemsList.FirstOrDefault(i => i.Name.ToLower().StartsWith(_typeBuffer));
+            if (match != null)
+            {
+                _focusedItem = match;
+                _lastClickedItem = match;
+                _selectedItems.Clear();
+                _selectedItems.Add(match);
+            }
+        }
+    }
+
+    private static readonly HashSet<string> _imageExtensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg" };
+
+    private bool IsImageFile(FileSystemItem item)
+    {
+        if (item.Type != FileSystemItemType.File) return false;
+        var ext = GetExtension(item.Name);
+        return _imageExtensions.Contains(ext);
+    }
+
+    private string GetIconForItem(FileSystemItem item)
+    {
+        if (item.Type == FileSystemItemType.Folder) return "folder";
+        if (item.Type == FileSystemItemType.Archive) return "folder_zip";
+        return "insert_drive_file";
+    }
+
+    private string GetIconClass(FileSystemItem item)
+    {
+        if (item.Type == FileSystemItemType.Folder) return "icon-folder";
+        if (item.Type == FileSystemItemType.Archive) return "icon-archive";
+        return "icon-file";
+    }
+
+    private string GetFileName(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        int lastSlash = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
+        return lastSlash >= 0 ? path.Substring(lastSlash + 1) : path;
+    }
+
+    private string GetDirectoryName(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return string.Empty;
+        var normalized = path.TrimEnd('/', '\\');
+        int lastSlash = Math.Max(normalized.LastIndexOf('/'), normalized.LastIndexOf('\\'));
+        if (lastSlash <= 0) return string.Empty;
+        if (lastSlash == 2 && normalized[1] == ':') return normalized.Substring(0, 3);
+        return normalized.Substring(0, lastSlash);
+    }
+
+    private string CombinePaths(string path1, string path2)
+    {
+        if (string.IsNullOrEmpty(path1)) return path2;
+        if (string.IsNullOrEmpty(path2)) return path1;
+        var p1 = path1.TrimEnd('/', '\\');
+        var p2 = path2.TrimStart('/', '\\');
+        char sep = p1.Contains('\\') ? '\\' : '/';
+        return p1 + sep + p2;
+    }
+
+    private string GetFileNameWithoutExtension(string path)
+    {
+        var fileName = GetFileName(path);
+        int lastDot = fileName.LastIndexOf('.');
+        return lastDot > 0 ? fileName.Substring(0, lastDot) : fileName;
+    }
+
+    private string GetExtension(string path)
+    {
+        var fileName = GetFileName(path);
+        int lastDot = fileName.LastIndexOf('.');
+        return lastDot >= 0 ? fileName.Substring(lastDot) : string.Empty;
+    }
+
+    private async Task ShowPropertiesDialogAsync(FileSystemItem item)
+    {
+        try
+        {
+            var targetItems = _selectedItems.Contains(item) ? _selectedItems.ToList() : new List<FileSystemItem> { item };
+            if (!targetItems.Any()) return;
+
+            string uri = "api/fileexplorer/properties";
+            Result<FileProperties>? responseResult;
+
+            if (targetItems.Count == 1)
+            {
+                var queryUri = $"{uri}?path={Uri.EscapeDataString(targetItems[0].FullPath)}";
+                responseResult = await Http.GetFromJsonAsync<Result<FileProperties>>(queryUri);
+            }
+            else
+            {
+                var response = await Http.PostAsJsonAsync(uri, targetItems.Select(i => i.FullPath).ToArray());
+                responseResult = await response.Content.ReadFromJsonAsync<Result<FileProperties>>();
+            }
+
+            if (responseResult != null && responseResult.IsSuccess && responseResult.Value != null)
+            {
+                var props = responseResult.Value;
+                await DialogService.OpenAsync("Properties", ds =>
+                    @<div style="padding: 10px; overflow-y: auto; max-height: 400px;">
+                        <div style="margin-bottom: 8px;"><strong>Name:</strong> @props.Name</div>
+                        <div style="margin-bottom: 8px;"><strong>Type:</strong> @props.Type</div>
+                        <div style="margin-bottom: 8px;"><strong>Location:</strong> @props.Location</div>
+                        <div style="margin-bottom: 8px;">
+                            <strong>Size:</strong> @($"{FormatSize(props.Size)} ({props.Size:N0} bytes)")
+                        </div>
+                        <div style="margin-bottom: 8px;">
+                            <strong>Contains:</strong> @props.FileCount Files, @props.FolderCount Folders
+                        </div>
+                        <hr />
+                        @if (props.Created.HasValue)
+                        {
+                            <div style="margin-bottom: 8px;"><strong>Created:</strong> @props.Created.Value.ToLocalTime()</div>
+                        }
+                        @if (props.LastModified.HasValue)
+                        {
+                            <div style="margin-bottom: 8px;"><strong>Modified:</strong> @props.LastModified.Value.ToLocalTime()</div>
+                        }
+                        @if (props.Accessed.HasValue)
+                        {
+                            <div style="margin-bottom: 8px;"><strong>Accessed:</strong> @props.Accessed.Value.ToLocalTime()</div>
+                        }
+                        <hr />
+                        <div style="margin-bottom: 8px;"><strong>Attributes:</strong></div>
+                        <div style="margin-left: 10px;">
+                            <div style="margin-bottom: 4px;">
+                                <RadzenCheckBox Value=@(props.IsReadOnly ?? false) Disabled="true" TriState="true" />
+                                <span class="ms-2">Read-only @(props.IsReadOnly == null ? "(Mixed)" : "")</span>
+                            </div>
+                            <div style="margin-bottom: 4px;">
+                                <RadzenCheckBox Value=@(props.IsHidden ?? false) Disabled="true" TriState="true" />
+                                <span class="ms-2">Hidden @(props.IsHidden == null ? "(Mixed)" : "")</span>
+                            </div>
+                            <div style="margin-bottom: 4px;">
+                                <RadzenCheckBox Value=@(props.IsSystem ?? false) Disabled="true" TriState="true" />
+                                <span class="ms-2">System @(props.IsSystem == null ? "(Mixed)" : "")</span>
+                            </div>
+                            <div style="margin-bottom: 20px;">
+                                <RadzenCheckBox Value=@(props.IsArchive ?? false) Disabled="true" TriState="true" />
+                                <span class="ms-2">Archive @(props.IsArchive == null ? "(Mixed)" : "")</span>
+                            </div>
+                        </div>
+                        <div class="row pt-3">
+                            <div class="col-md-12 text-right">
+                                <RadzenButton Text="OK" Click="@(args => ds.Close())" Style="width: 120px" class="ms-1" />
+                            </div>
+                        </div>
+                    </div>, new DialogOptions() { Width = "500px", Height = "500px" });
+            }
+            else
+            {
+                NotificationService.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Error", Detail = responseResult?.ErrorMessage ?? "Could not load properties." });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to get properties");
+            NotificationService.Notify(new NotificationMessage { Severity = NotificationSeverity.Error, Summary = "Error", Detail = "Failed to load properties." });
+        }
+    }
+}
+
+
+
+
+

@@ -1,0 +1,6 @@
+﻿namespace WebFileExplorer.Shared;
+
+public class Class1
+{
+
+}

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="WebFileExplorer.Client/WebFileExplorer.Client.csproj" />
+  <Project Path="WebFileExplorer.Server/WebFileExplorer.Server.csproj" />
+  <Project Path="WebFileExplorer.Shared/WebFileExplorer.Shared.csproj" />
+  <Project Path="WebFileExplorer.Tests/WebFileExplorer.Tests.csproj" />
+</Solution>

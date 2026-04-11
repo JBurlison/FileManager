@@ -1,0 +1,112 @@
+@using WebFileExplorer.Shared.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject DialogService DialogService
+
+<RadzenStack Gap="1rem">
+    <div class="d-flex align-items-center mb-2">
+        <RadzenButton Icon="arrow_upward" Click="@NavigateUp" Class="rz-mr-2" Size="ButtonSize.Small" title="Up" />
+        <RadzenTextBox @bind-Value="@_currentPath" style="flex: 1" Disabled="true" />
+    </div>
+
+    @if (_isLoading)
+    {
+        <RadzenProgressBar Value="100" ShowValue="false" Mode="ProgressBarMode.Indeterminate" Style="width:100%" />
+    }
+    else
+    {
+        <RadzenDataGrid Data="@_folders" TItem="FileSystemItem"
+                        RowDoubleClick="@(async args => await LoadDirectoryAsync(args.Data!.FullPath))"
+                        SelectionMode="DataGridSelectionMode.Single"
+                        @bind-Value=@_selectedItems
+                        Style="height: 300px">
+            <Columns>
+                <RadzenDataGridColumn TItem="FileSystemItem" Property="Name" Title="Name">
+                    <Template Context="item">
+                        <RadzenIcon Icon="folder" Style="vertical-align: middle; margin-right: 8px;" />
+                        @item.Name
+                    </Template>
+                </RadzenDataGridColumn>
+            </Columns>
+        </RadzenDataGrid>
+    }
+
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" JustifyContent="JustifyContent.End">
+        <RadzenButton Text="Select Current" Click="@(() => DialogService.Close(_currentPath))" ButtonStyle="ButtonStyle.Primary" Style="width: 150px" />
+        <RadzenButton Text="Select Highlighted" Click="@(() => DialogService.Close(_selectedItems.FirstOrDefault()?.FullPath ?? _currentPath))" ButtonStyle="ButtonStyle.Primary" Style="width: 150px" Disabled="@(!_selectedItems.Any())" />
+        <RadzenButton Text="Cancel" Click="@(() => DialogService.Close(null))" ButtonStyle="ButtonStyle.Light" Style="width: 100px" />
+    </RadzenStack>
+</RadzenStack>
+
+@code {
+    [Parameter] public string InitialPath { get; set; } = string.Empty;
+
+    private string _currentPath = string.Empty;
+    private List<FileSystemItem> _folders = new();
+    private IList<FileSystemItem> _selectedItems = new List<FileSystemItem>();
+    private bool _isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDirectoryAsync(InitialPath);
+    }
+
+    private async Task LoadDirectoryAsync(string path)
+    {
+        _isLoading = true;
+        _currentPath = path ?? string.Empty;
+        _selectedItems.Clear();
+        
+        try
+        {
+            var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(_currentPath)}&showHidden=false";
+            var response = await Http.GetAsync(uri);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<Result<IEnumerable<FileSystemItem>>>();
+                if (result != null && result.IsSuccess && result.Value != null)
+                {
+                    _folders = result.Value.Where(x => x.Type == FileSystemItemType.Folder).OrderBy(x => x.Name).ToList();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task NavigateUp()
+    {
+        try
+        {
+            var uri = $"api/fileexplorer/parent?path={Uri.EscapeDataString(_currentPath)}";
+            var response = await Http.GetAsync(uri);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<Result<string>>();
+                if (result != null && result.IsSuccess && result.Value != null)
+                {
+                    await LoadDirectoryAsync(result.Value);
+                }
+                else
+                {
+                    await LoadDirectoryAsync("");
+                }
+            }
+            else
+            {
+                await LoadDirectoryAsync("");
+            }
+        }
+        catch
+        {
+            await LoadDirectoryAsync("");
+        }
+    }
+}
