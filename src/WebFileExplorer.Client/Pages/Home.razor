@@ -69,12 +69,16 @@
             }
             else
             {
-                <RadzenTree Style="width: 100%" @oncontextmenu:preventDefault="true">
+                <div class="tree-container" style="width: 100%;">
                     @foreach (var node in _treeNodes)
                     {
-                        @RenderTreeNode(node)
+                        <TreeNodeComponent Node="@node" 
+                                          ExpandedNodes="@_expandedNodes" 
+                                          SelectedNode="@_selectedTreeNode"
+                                          OnNodeClick="@OnTreeNodeClick"
+                                          OnNodeToggle="@OnTreeNodeToggle" />
                     }
-                </RadzenTree>
+                </div>
             }
         </div>
     </RadzenSplitterPane>
@@ -256,9 +260,7 @@
     private DateTime _lastTypeTime = DateTime.MinValue;
 
     private RadzenTree? _tree;
-    private Dictionary<string, FileSystemItem> _loadedTreeItemMap = new(StringComparer.OrdinalIgnoreCase);
-    private HashSet<object> _expandedNodes = new();
-    private object? _selectedTreeItem;
+    private HashSet<string> _expandedNodes = new(StringComparer.OrdinalIgnoreCase);
 
     [Parameter]
     [SupplyParameterFromQuery]
@@ -403,49 +405,6 @@
             await JS.InvokeVoidAsync("sessionStorage.setItem", "lastPath", _currentPath);
         }
         catch { }
-    }
-
-    private async Task OnTreeSelectionChange(TreeEventArgs args)
-    {
-        var nodeObj = ExtractNodeObject(args.Value);
-        if (nodeObj != null)
-        {
-            await LoadDirectoryAsync(nodeObj.Path);
-        }
-    }
-
-    private async Task LoadChildren(TreeExpandEventArgs args)
-    {
-        var nodeObj = ExtractNodeObject(args.Value);
-        if (nodeObj != null)
-        {
-            try
-            {
-                var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(nodeObj.Path)}&showHidden={_showHidden}";
-                var response = await Http.GetAsync(uri);
-                if (response.IsSuccessStatusCode)
-                {
-                    var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>();
-                    var items = result?.Items;
-                    if (items != null)
-                    {
-                        var directories = items.Where(i => i.Type == FileSystemItemType.Folder).OrderBy(i => i.Name).ToList();
-                        foreach(var d in directories) 
-                        {
-                            _loadedTreeItemMap[d.FullPath] = d;
-                        }
-                        args.Children.Data = directories;
-                        args.Children.TextProperty = "Name";
-                        args.Children.HasChildren = (item) => true;
-                        args.Children.Template = args.Children.Template; 
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Failed to load children for tree node {Path}", nodeObj.Path);
-            }
-        }
     }
 
     private async Task OnRowDoubleClick(DataGridRowMouseEventArgs<FileSystemItem> args)
@@ -779,98 +738,69 @@
 
     private async Task SyncTreeSelectionAsync(string path)
     {
-        if (_roots == null) return;
+        if (_treeNodes.Count == 0) return;
 
         if (path.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase))
         {
-            _selectedTreeItem = _roots.FirstOrDefault(r => r.RootDirectory == "::RecycleBin::");
+            _selectedTreeNode = _treeNodes.FirstOrDefault(n => n.Path == "::RecycleBin::");
             return;
         }
 
         char separator = path.Contains('\\') ? '\\' : '/';
 
-        // Find the matching root drive
-        DriveItem? rootMatch = null;
-        foreach (var root in _roots)
+        // Find the matching root node
+        TreeNodeObj? rootNode = null;
+        foreach (var node in _treeNodes)
         {
-            if (root.RootDirectory == "::RecycleBin::") continue;
-            string rootPath = root.RootDirectory.TrimEnd('/', '\\') + separator;
+            if (node.Path == "::RecycleBin::") continue;
+            string rootPath = node.Path.TrimEnd('/', '\\') + separator;
             string testPath = path.TrimEnd('/', '\\') + separator;
             if (testPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
             {
-                rootMatch = root;
+                rootNode = node;
                 break;
             }
         }
 
-        if (rootMatch == null) return;
+        if (rootNode == null) return;
 
-        // Build the list of intermediate directories from root to target
-        string rootDir = rootMatch.RootDirectory.TrimEnd('/', '\\');
+        string rootDir = rootNode.Path.TrimEnd('/', '\\');
         string targetDir = path.TrimEnd('/', '\\');
 
         if (string.Equals(rootDir, targetDir, StringComparison.OrdinalIgnoreCase))
         {
-            _selectedTreeItem = rootMatch;
+            _selectedTreeNode = rootNode;
             return;
         }
 
-        // Split into segments after the root
+        // Split path into segments after root
         string relative = targetDir.Substring(rootDir.Length).TrimStart('/', '\\');
         var segments = relative.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
 
-        // Walk down the tree, expanding and loading children at each level
-        _expandedNodes.Add(rootMatch);
-
-        string currentPath = rootDir;
-        object? currentNode = rootMatch;
+        // Walk down, loading children at each level
+        _expandedNodes.Add(rootNode.Path);
+        var currentNode = rootNode;
 
         foreach (var segment in segments)
         {
-            currentPath = currentPath.TrimEnd('/', '\\') + separator + segment;
-
-            // Load children of current node if not already loaded
-            if (!_loadedTreeItemMap.ContainsKey(currentPath))
+            // Ensure children are loaded
+            if (!currentNode.ChildrenLoaded)
             {
-                var parentPath = ExtractNodeObject(currentNode)?.Path;
-                if (parentPath != null)
-                {
-                    try
-                    {
-                        var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(parentPath)}&showHidden={_showHidden}";
-                        var response = await Http.GetAsync(uri);
-                        if (response.IsSuccessStatusCode)
-                        {
-                            var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>();
-                            var items = result?.Items;
-                            if (items != null)
-                            {
-                                var directories = items.Where(i => i.Type == FileSystemItemType.Folder).OrderBy(i => i.Name).ToList();
-                                foreach (var d in directories)
-                                {
-                                    _loadedTreeItemMap[d.FullPath] = d;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
+                await LoadTreeNodeChildren(currentNode);
             }
 
             // Find the child matching this segment
-            if (_loadedTreeItemMap.TryGetValue(currentPath, out var childItem))
-            {
-                _expandedNodes.Add(childItem);
-                currentNode = childItem;
-            }
-            else
-            {
-                // Can't go deeper, select what we have
-                break;
-            }
+            var child = currentNode.Children.FirstOrDefault(c =>
+                c.Name.Equals(segment, StringComparison.OrdinalIgnoreCase));
+
+            if (child == null) break;
+
+            _expandedNodes.Add(child.Path);
+            currentNode = child;
         }
 
-        _selectedTreeItem = currentNode;
+        // The last expanded node IS the current folder, so just select it (don't expand it unless user does)
+        _selectedTreeNode = currentNode;
         StateHasChanged();
     }
 
@@ -1607,37 +1537,61 @@
 
     private bool IsNodeExpanded(object data)
     {
-        return _expandedNodes.Contains(data);
+        if (data is TreeNodeObj node) return _expandedNodes.Contains(node.Path);
+        return false;
     }
 
-    private async Task OnTreeExpand(TreeExpandEventArgs args)
+    private TreeNodeObj? _selectedTreeNode;
+
+    private async Task OnTreeNodeClick(TreeNodeObj node)
     {
-        _expandedNodes.Add(args.Value);
-        await LoadChildren(args);
+        _selectedTreeNode = node;
+        await LoadDirectoryAsync(node.Path);
     }
 
-    private void OnTreeCollapse(TreeEventArgs args)
+    private async Task OnTreeNodeToggle(TreeNodeObj node)
     {
-        _expandedNodes.Remove(args.Value);
-    }
-
-    private TreeNodeObj? ExtractNodeObject(object obj)
-    {
-        if (obj == null) return null;
-        
-        var valType = obj.GetType();
-        var valProp = valType.GetProperty("Value");
-        var actualVal = valProp != null ? valProp.GetValue(obj) : obj;
-
-        if (actualVal is DriveItem drive)
+        if (_expandedNodes.Contains(node.Path))
         {
-            return new TreeNodeObj { Name = drive.Name, Path = drive.RootDirectory, IsDrive = true };
+            _expandedNodes.Remove(node.Path);
         }
-        else if (actualVal is FileSystemItem folder)
+        else
         {
-            return new TreeNodeObj { Name = folder.Name, Path = folder.FullPath, IsDrive = false };
+            _expandedNodes.Add(node.Path);
+            if (!node.ChildrenLoaded)
+            {
+                await LoadTreeNodeChildren(node);
+            }
         }
-        return null;
+        StateHasChanged();
+    }
+
+    private async Task LoadTreeNodeChildren(TreeNodeObj node)
+    {
+        if (node.Path == "::RecycleBin::") return;
+        try
+        {
+            var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(node.Path)}&showHidden={_showHidden}";
+            var response = await Http.GetAsync(uri);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<WebFileExplorer.Shared.Models.PagedResult<FileSystemItem>>();
+                var items = result?.Items;
+                if (items != null)
+                {
+                    node.Children = items
+                        .Where(i => i.Type == FileSystemItemType.Folder)
+                        .OrderBy(i => i.Name)
+                        .Select(d => new TreeNodeObj { Name = d.Name, Path = d.FullPath })
+                        .ToList();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load children for tree node {Path}", node.Path);
+        }
+        node.ChildrenLoaded = true;
     }
 
     private void OnTreeContextMenu(Microsoft.AspNetCore.Components.Web.MouseEventArgs args, TreeNodeObj? nodeObj)

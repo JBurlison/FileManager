@@ -1,0 +1,32 @@
+.tree-node-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 6px;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.tree-node-row:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.tree-node-row.selected {
+    background-color: rgba(33, 150, 243, 0.3);
+    border: 1px solid #2196f3;
+}
+
+.tree-node-name {
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    flex-shrink: 0;
+}

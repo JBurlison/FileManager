@@ -1,0 +1,50 @@
+@using static WebFileExplorer.Client.Pages.Home
+
+<div class="tree-node">
+    <div class="tree-node-row @(IsSelected ? "selected" : "")" 
+         @onclick="@(() => OnNodeClick.InvokeAsync(Node))"
+         @onclick:stopPropagation="true">
+        <span class="tree-toggle" @onclick="@OnToggle" @onclick:stopPropagation="true">
+            @if (Node.Path != "::RecycleBin::" && (Node.Children.Any() || !Node.ChildrenLoaded))
+            {
+                <RadzenIcon Icon="@(IsExpanded ? "expand_more" : "chevron_right")" Style="font-size: 16px; cursor: pointer;" />
+            }
+            else
+            {
+                <span style="width: 16px; display: inline-block;"></span>
+            }
+        </span>
+        <RadzenIcon Icon="@(Node.Path == "::RecycleBin::" ? "delete" : "folder")" 
+                    Style="font-size: 16px; margin-right: 4px; color: #ffca28;" />
+        <span class="tree-node-name">@Node.Name</span>
+    </div>
+    @if (IsExpanded && Node.ChildrenLoaded)
+    {
+        <div class="tree-children" style="padding-left: 16px;">
+            @foreach (var child in Node.Children)
+            {
+                <TreeNodeComponent Node="@child" 
+                                  ExpandedNodes="@ExpandedNodes" 
+                                  SelectedNode="@SelectedNode"
+                                  OnNodeClick="@OnNodeClick"
+                                  OnNodeToggle="@OnNodeToggle" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public TreeNodeObj Node { get; set; } = default!;
+    [Parameter] public HashSet<string> ExpandedNodes { get; set; } = default!;
+    [Parameter] public TreeNodeObj? SelectedNode { get; set; }
+    [Parameter] public EventCallback<TreeNodeObj> OnNodeClick { get; set; }
+    [Parameter] public EventCallback<TreeNodeObj> OnNodeToggle { get; set; }
+
+    private bool IsExpanded => ExpandedNodes.Contains(Node.Path);
+    private bool IsSelected => SelectedNode?.Path == Node.Path;
+
+    private async Task OnToggle()
+    {
+        await OnNodeToggle.InvokeAsync(Node);
+    }
+}
