@@ -94,9 +94,9 @@ public class HomeTests : BunitContext
         {
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=C%3A%5C"))
             {
-                var items = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var items = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("Folder1", "C:\\Folder1", FileSystemItemType.Folder, 0, DateTime.Now, false)
+                    Items = [new FileSystemItem("Folder1", "C:\\Folder1", FileSystemItemType.Folder, 0, DateTime.Now, false)]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -128,17 +128,17 @@ public class HomeTests : BunitContext
         {
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=C%3A%5C"))
             {
-                var items = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var items = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("Subfolder", "C:\\Subfolder", FileSystemItemType.Folder, 0, DateTime.Now, false)
+                    Items = [new FileSystemItem("Subfolder", "C:\\Subfolder", FileSystemItemType.Folder, 0, DateTime.Now, false)]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(items)) };
             }
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=C%3A%5CSubfolder"))
             {
-                var subItems = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var subItems = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("File.txt", "C:\\Subfolder\\File.txt", FileSystemItemType.File, 1024, DateTime.Now, false)
+                    Items = [new FileSystemItem("File.txt", "C:\\Subfolder\\File.txt", FileSystemItemType.File, 1024, DateTime.Now, false)]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(subItems)) };
             }
@@ -172,9 +172,9 @@ public class HomeTests : BunitContext
         {
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=D%3A%5CExplicitPath"))
             {
-                var items = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var items = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("Doc.pdf", "D:\\ExplicitPath\\Doc.pdf", FileSystemItemType.File, 2048, DateTime.Now, false)
+                    Items = [new FileSystemItem("Doc.pdf", "D:\\ExplicitPath\\Doc.pdf", FileSystemItemType.File, 2048, DateTime.Now, false)]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(items)) };
             }
@@ -262,9 +262,9 @@ public class HomeTests : BunitContext
         {
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=C%3A%5C"))
             {
-                var items = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var items = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("File1", "C:\\File1", FileSystemItemType.File, 1234, DateTime.Now, false)
+                    Items = [new FileSystemItem("File1", "C:\\File1", FileSystemItemType.File, 1234, DateTime.Now, false)]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(items)) };
             }

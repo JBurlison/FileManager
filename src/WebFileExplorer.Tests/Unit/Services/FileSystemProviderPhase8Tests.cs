@@ -55,10 +55,10 @@ public class FileSystemProviderPhase8Tests
         File.WriteAllText(Path.Combine(subDir, "test2.txt"), "content");
         
         // Act
-        var results = (await _provider.SearchAsync(_testRoot, "test")).ToList();
+        var results = (await _provider.SearchAsync(_testRoot, "test")).Items;
         
         // Assert
-        if (results.Count != 2) Assert.Fail();
+        if (results.Count() != 2) Assert.Fail();
         Assert.IsTrue(results.Any(r => r.Name == "test1.txt" && r.FullPath.Contains(_testRoot)));
         Assert.IsTrue(results.Any(r => r.Name == "test2.txt" && r.FullPath.Contains(subDir)));
     }

@@ -122,7 +122,11 @@ public class HomePhase5Tests : BunitContext
                 return new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = JsonContent.Create(new[] { new DriveItem("D:", "D:\\", 100, 100) }) };
             
             if (req.RequestUri?.PathAndQuery.Contains("api/fileexplorer/list") == true)
-                return new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = JsonContent.Create(new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }()) };
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = JsonContent.Create(new PagedResult<FileSystemItem> { Items = [] })
+                };
 
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery.Contains("api/fileexplorer/copy") == true)
             {
@@ -159,7 +163,11 @@ public class HomePhase5Tests : BunitContext
                 return new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = JsonContent.Create(new[] { new DriveItem("D:", "D:\\", 100, 100) }) };
             
             if (req.RequestUri?.PathAndQuery.Contains("api/fileexplorer/list") == true)
-                return new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = JsonContent.Create(new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }()) };
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = JsonContent.Create(new PagedResult<FileSystemItem> { Items = [] })
+                };
 
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery.Contains("api/fileexplorer/copy") == true)
             {
@@ -264,7 +272,11 @@ public class HomePhase5Tests : BunitContext
                         new FileSystemItem("test.txt", @"D:\test.txt", FileSystemItemType.File, 1024, DateTimeOffset.UtcNow, false)
                     }) };
                 }
-                return new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = JsonContent.Create(new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }()) };
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = JsonContent.Create(new PagedResult<FileSystemItem> { Items = [] })
+                };
             }
 
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery.Contains("api/fileexplorer/copy") == true)

@@ -34,10 +34,13 @@ public class HomePhase4Tests : BunitContext
         {
             if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list"))
             {
-                var items = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+                var items = new PagedResult<FileSystemItem>
                 {
-                    new FileSystemItem("Folder", "C:\\Folder", FileSystemItemType.Folder, 0, DateTime.Now, false),
-                    new FileSystemItem("File.txt", "C:\\File.txt", FileSystemItemType.File, 100, DateTime.Now, false)
+                    Items =
+                    [
+                        new FileSystemItem("Folder", "C:\\Folder", FileSystemItemType.Folder, 0, DateTime.Now, false),
+                        new FileSystemItem("File.txt", "C:\\File.txt", FileSystemItemType.File, 100, DateTime.Now, false)
+                    ]
                 };
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(items)) };
             }

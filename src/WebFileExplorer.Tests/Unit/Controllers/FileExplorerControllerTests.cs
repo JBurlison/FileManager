@@ -52,12 +52,15 @@ public class FileExplorerControllerTests
     public async Task ListDirectories_WithValidPath_ReturnsOk()
     {
         var path = @"C:\valid";
-        var expectedItems = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() } { new FileSystemItem(path, "valid", FileSystemItemType.Folder, 0, DateTime.Now, false) };
-        _providerMock!.Setup(p => p.ListDirectoriesAsync(, , null, null, default), It.IsAny<CancellationToken>())).ReturnsAsync(expectedItems);
+        var expectedItems = new PagedResult<FileSystemItem>
+        {
+            Items = [new FileSystemItem(path, "valid", FileSystemItemType.Folder, 0, DateTime.Now, false)]
+        };
+        _providerMock!.Setup(p => p.ListDirectoriesAsync(path, false, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(expectedItems);
         var loggerMock = new Mock<ILogger<FileExplorerController>>();
         var controller = new FileExplorerController(_providerMock.Object, new Mock<IArchiveService>().Object, WebFileExplorer.Tests.Unit.Controllers.MockHelper.GetMockRecycleBinService(), loggerMock.Object);
 
-        var result = await controller.ListDirectories(path, false, CancellationToken.None);
+        var result = await controller.ListDirectories(path, false, null, null, CancellationToken.None);
 
         var okResult = result.Result as OkObjectResult;
         Assert.IsNotNull(okResult);
@@ -71,7 +74,7 @@ public class FileExplorerControllerTests
         var loggerMock = new Mock<ILogger<FileExplorerController>>();
         var controller = new FileExplorerController(_providerMock!.Object, new Mock<IArchiveService>().Object, WebFileExplorer.Tests.Unit.Controllers.MockHelper.GetMockRecycleBinService(), loggerMock.Object);
 
-        var result = await controller.ListDirectories("", false, CancellationToken.None);
+        var result = await controller.ListDirectories("", false, null, null, CancellationToken.None);
 
         var badRequest = result.Result as BadRequestObjectResult;
         Assert.IsNotNull(badRequest);
@@ -82,11 +85,11 @@ public class FileExplorerControllerTests
     public async Task ListDirectories_Unauthorized_Returns403()
     {
         var path = @"C:\secret";
-        _providerMock!.Setup(p => p.ListDirectoriesAsync(, , null, null, default), It.IsAny<CancellationToken>())).ThrowsAsync(new UnauthorizedAccessException());
+        _providerMock!.Setup(p => p.ListDirectoriesAsync(path, false, null, null, It.IsAny<CancellationToken>())).ThrowsAsync(new UnauthorizedAccessException());
         var loggerMock = new Mock<ILogger<FileExplorerController>>();
         var controller = new FileExplorerController(_providerMock.Object, new Mock<IArchiveService>().Object, WebFileExplorer.Tests.Unit.Controllers.MockHelper.GetMockRecycleBinService(), loggerMock.Object);
 
-        var result = await controller.ListDirectories(path, false, CancellationToken.None);
+        var result = await controller.ListDirectories(path, false, null, null, CancellationToken.None);
 
         var objectResult = result.Result as ObjectResult;
         Assert.IsNotNull(objectResult);
@@ -97,11 +100,11 @@ public class FileExplorerControllerTests
     public async Task ListDirectories_NotFound_ReturnsNotFound()
     {
         var path = @"C:\nonexistent";
-        _providerMock!.Setup(p => p.ListDirectoriesAsync(, , null, null, default), It.IsAny<CancellationToken>())).ThrowsAsync(new System.IO.DirectoryNotFoundException());
+        _providerMock!.Setup(p => p.ListDirectoriesAsync(path, false, null, null, It.IsAny<CancellationToken>())).ThrowsAsync(new System.IO.DirectoryNotFoundException());
         var loggerMock = new Mock<ILogger<FileExplorerController>>();
         var controller = new FileExplorerController(_providerMock.Object, new Mock<IArchiveService>().Object, WebFileExplorer.Tests.Unit.Controllers.MockHelper.GetMockRecycleBinService(), loggerMock.Object);
 
-        var result = await controller.ListDirectories(path, false, CancellationToken.None);
+        var result = await controller.ListDirectories(path, false, null, null, CancellationToken.None);
 
         var notFound = result.Result as NotFoundObjectResult;
         Assert.IsNotNull(notFound);
@@ -112,11 +115,11 @@ public class FileExplorerControllerTests
     public async Task ListDirectories_Exception_Returns500()
     {
         var path = @"C:\error";
-        _providerMock!.Setup(p => p.ListDirectoriesAsync(, , null, null, default), It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("test error"));
+        _providerMock!.Setup(p => p.ListDirectoriesAsync(path, false, null, null, It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("test error"));
         var loggerMock = new Mock<ILogger<FileExplorerController>>();
         var controller = new FileExplorerController(_providerMock.Object, new Mock<IArchiveService>().Object, WebFileExplorer.Tests.Unit.Controllers.MockHelper.GetMockRecycleBinService(), loggerMock.Object);
 
-        var result = await controller.ListDirectories(path, false, CancellationToken.None);
+        var result = await controller.ListDirectories(path, false, null, null, CancellationToken.None);
 
         var objectResult = result.Result as ObjectResult;
         Assert.IsNotNull(objectResult);

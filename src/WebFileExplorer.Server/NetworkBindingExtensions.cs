@@ -1,66 +1,90 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 
-namespace WebFileExplorer.Server;
+namespace WebFileExplorer.Server.Configuration;
 
 public static class NetworkBindingExtensions
 {
-    private const string AllowedPrefixKey = "NetworkBinding:AllowedPrefix";
-    private const string PortKey = "NetworkBinding:Port";
-    private const string DefaultPrefix = "10.0.0.";
-    private const int DefaultPort = 5000;
+    private const string NetworkBindingSection = "NetworkBinding";
+    private const string AllowedPrefixKey = NetworkBindingSection + ":AllowedPrefix";
+    private const string AllowedPrefixesKey = NetworkBindingSection + ":AllowedPrefixes";
+    private const string PortKey = NetworkBindingSection + ":Port";
 
-    public static IWebHostBuilder ConfigureNetworkBindings(this IWebHostBuilder webHostBuilder, IConfiguration configuration, bool isDevelopment)
+    public static ConfigureWebHostBuilder ConfigureNetworkBindings(
+        this ConfigureWebHostBuilder builder,
+        IConfiguration configuration,
+        bool isDevelopment)
     {
-        var allowedIPPrefix = configuration[AllowedPrefixKey] ?? DefaultPrefix;
-        var bindPort = configuration.GetValue<int>(PortKey, DefaultPort);
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
-        if (!isDevelopment && !allowedIPPrefix.StartsWith(DefaultPrefix))
+        var allowedPrefixes = GetAllowedPrefixes(configuration);
+        var port = configuration.GetValue<int?>(PortKey) ?? 5000;
+
+        if (TryFindBindingAddress(allowedPrefixes, out var bindingAddress))
         {
-            throw new InvalidOperationException($"Strict hosting to {DefaultPrefix}x interfaces is required in production environments.");
+            builder.UseUrls($"http://{bindingAddress}:{port}");
+            return builder;
         }
-
-        var networkInterfaces = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(ni => ni.OperationalStatus == OperationalStatus.Up)
-            .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
-            .Where(ua => ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-            .Select(ua => ua.Address)
-            .ToList();
-
-        var allowedAddresses = networkInterfaces.Where(ip => ip.ToString().StartsWith(allowedIPPrefix)).ToList();
 
         if (isDevelopment)
         {
-            if (!allowedAddresses.Contains(IPAddress.Loopback))
-                allowedAddresses.Add(IPAddress.Loopback);
-                
-            if (!allowedAddresses.Contains(IPAddress.IPv6Loopback))
-                allowedAddresses.Add(IPAddress.IPv6Loopback);
+            builder.UseUrls($"http://127.0.0.1:{port}");
+            return builder;
         }
 
-        if (!allowedAddresses.Any())
-        {
-            throw new InvalidOperationException($"FATAL ERROR: No network interfaces matching '{allowedIPPrefix}' found. The application strictly requires a local {allowedIPPrefix}x network. Shutting down.");
-        }
+        var configuredPrefixes = allowedPrefixes.Length == 0 ? "<none>" : string.Join(", ", allowedPrefixes);
+        throw new InvalidOperationException($"FATAL ERROR: No network interfaces matching '{configuredPrefixes}' found. The application strictly requires a configured local network. Shutting down.");
+    }
 
-        webHostBuilder.ConfigureKestrel(options =>
-        {
-            var logger = options.ApplicationServices.GetService<ILogger<Program>>();
+    private static bool TryFindBindingAddress(string[] allowedPrefixes, out IPAddress bindingAddress)
+    {
+        bindingAddress = IPAddress.None;
 
-            foreach (var ip in allowedAddresses)
+        foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (networkInterface.OperationalStatus != OperationalStatus.Up)
             {
-                options.Listen(ip, bindPort);
-                if (logger != null)
+                continue;
+            }
+
+            foreach (var unicastAddress in networkInterface.GetIPProperties().UnicastAddresses)
+            {
+                var address = unicastAddress.Address;
+                if (address.AddressFamily != AddressFamily.InterNetwork)
                 {
-                    logger.LogInformation("Binding to allowed local address: {IP}:{Port}", ip, bindPort);
+                    continue;
                 }
-                else
+
+                var ipString = address.ToString();
+                if (allowedPrefixes.Any(prefix => ipString.StartsWith(prefix, StringComparison.Ordinal)))
                 {
-                    Console.WriteLine($"Binding to allowed local address: {ip}:{bindPort}");
+                    bindingAddress = address;
+                    return true;
                 }
             }
-        });
+        }
 
-        return webHostBuilder;
+        return false;
+    }
+
+    private static string[] GetAllowedPrefixes(IConfiguration configuration)
+    {
+        var prefix = configuration[AllowedPrefixKey];
+        if (!string.IsNullOrWhiteSpace(prefix))
+        {
+            return [prefix];
+        }
+
+        var prefixes = configuration.GetSection(AllowedPrefixesKey).Get<string[]>();
+        if (prefixes is { Length: > 0 })
+        {
+            return prefixes.Where(prefix => !string.IsNullOrWhiteSpace(prefix)).ToArray();
+        }
+
+        return string.IsNullOrWhiteSpace(prefix) ? [] : [prefix];
     }
 }

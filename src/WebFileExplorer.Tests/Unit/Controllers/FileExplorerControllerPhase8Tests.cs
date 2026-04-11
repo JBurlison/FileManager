@@ -47,13 +47,13 @@ public class FileExplorerControllerPhase8Tests
     [TestMethod]
     public async Task Search_ValidRequest_ReturnsOkWithItems()
     {
-        var expectedItems = new WebFileExplorer.Shared.Models.PagedResult<WebFileExplorer.Shared.Models.FileSystemItem> { Items = new System.Collections.Generic.List<WebFileExplorer.Shared.Models.FileSystemItem>() }
+        var expectedItems = new PagedResult<FileSystemItem>
         {
-            new FileSystemItem("test.txt", "C:\\Auth\\test.txt", FileSystemItemType.File, 100, DateTimeOffset.Now, false)
+            Items = [new FileSystemItem("test.txt", "C:\\Auth\\test.txt", FileSystemItemType.File, 100, DateTimeOffset.Now, false)]
         };
         
         _providerMock
-            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>())
+            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedItems);
 
         var result = await _controller.Search("C:\\Auth", "test");
@@ -68,7 +68,7 @@ public class FileExplorerControllerPhase8Tests
     public async Task Search_UnauthorizedPath_ReturnsForbidden()
     {
         _providerMock
-            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>())
+            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException("Test auth fail"));
 
         var result = await _controller.Search("C:\\Windows", "test");
@@ -82,7 +82,7 @@ public class FileExplorerControllerPhase8Tests
     public async Task Search_OperationCancelled_Returns499()
     {
         _providerMock
-            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>())
+            .Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), null, null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         var result = await _controller.Search("C:\\Auth", "test");

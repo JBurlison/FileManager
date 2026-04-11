@@ -107,9 +107,9 @@ public class FileSystemProviderTests
         
         try
         {
-            var result = (await service.ListDirectoriesAsync(rootPath, false, CancellationToken.None)).ToList();
-            Assert.IsTrue(result.Any(r => r.Name == "SubDir" && r.Type == FileSystemItemType.Folder));
-            Assert.IsTrue(result.Any(r => r.Name == "file.txt" && r.Type == FileSystemItemType.File));
+            var result = await service.ListDirectoriesAsync(rootPath, false, null, null, CancellationToken.None);
+            Assert.IsTrue(result.Items.Any(r => r.Name == "SubDir" && r.Type == FileSystemItemType.Folder));
+            Assert.IsTrue(result.Items.Any(r => r.Name == "file.txt" && r.Type == FileSystemItemType.File));
         }
         finally
         {
@@ -135,7 +135,7 @@ public class FileSystemProviderTests
         
         try
         {
-            try { await service.ListDirectoriesAsync(otherPath, false, CancellationToken.None); Assert.Fail(); } catch (UnauthorizedAccessException) { }
+            try { await service.ListDirectoriesAsync(otherPath, false, null, null, CancellationToken.None); Assert.Fail(); } catch (UnauthorizedAccessException) { }
         }
         finally
         {

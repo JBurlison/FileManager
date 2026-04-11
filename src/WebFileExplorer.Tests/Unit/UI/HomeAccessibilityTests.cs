@@ -14,7 +14,7 @@ using Microsoft.JSInterop;
 namespace WebFileExplorer.Tests.Unit.UI
 {
     [TestClass]
-    public class HomeAccessibilityTests : TestContext
+    public class HomeAccessibilityTests : Bunit.TestContext
     {
         [TestInitialize]
         public void Setup()
@@ -35,7 +35,7 @@ namespace WebFileExplorer.Tests.Unit.UI
         public void Home_ShouldHave_AriaAttributes_For_Accessibility()
         {
             // Arrange
-            var comp = RenderComponent<Home>();
+            var comp = Render<Home>();
 
             // wait for async init to avoid exceptions in some cases, although not required if mock not throwing
             comp.WaitForState(() => true);

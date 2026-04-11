@@ -27,7 +27,6 @@ app.UseBlazorFrameworkFiles();
 app.MapStaticAssets();
 
 app.UseMiddleware<AllowedIPMiddleware>();
-
 app.UseRouting();
 app.MapRazorPages();
 app.MapControllers();
