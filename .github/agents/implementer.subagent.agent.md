@@ -3,7 +3,7 @@ name: implementer
 description: Implements C# code for a specific phase, code review fixes, or test failure fixes
 user-invocable: false
 tools: [vscode, execute, read, agent, edit, search, web, browser, 'github/*', todo]
-model: Claude Opus 4.6 (copilot)
+model: Claude Opus 4.7 (copilot)
 ---
 
 # Implementer

@@ -359,7 +359,7 @@ public class FileExplorerController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error compressing files.");
-            return StatusCode(500, Result.Failure("Failed to compress files. " + ex.Message));
+            return StatusCode(500, Result.Failure("Failed to compress files."));
         }
     }
 
@@ -398,7 +398,7 @@ public class FileExplorerController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error extracting zip file.");
-            return StatusCode(500, Result.Failure("Failed to extract zip file. " + ex.Message));
+            return StatusCode(500, Result.Failure("Failed to extract zip file."));
         }
     }
 }

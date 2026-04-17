@@ -56,24 +56,42 @@
         _isLoading = true;
         _currentPath = path ?? string.Empty;
         _selectedItems.Clear();
-        
+        _folders = new List<FileSystemItem>();
+
         try
         {
+            if (string.IsNullOrEmpty(_currentPath))
+            {
+                // No path yet — show authorized roots.
+                var roots = await Http.GetFromJsonAsync<List<DriveItem>>("api/fileexplorer/roots");
+                if (roots != null)
+                {
+                    _folders = roots
+                        .Select(r => new FileSystemItem(r.Name, r.RootDirectory, FileSystemItemType.Folder, 0, DateTime.MinValue, false))
+                        .OrderBy(x => x.Name)
+                        .ToList();
+                }
+                return;
+            }
+
             var uri = $"api/fileexplorer/list?path={Uri.EscapeDataString(_currentPath)}&showHidden=false";
             var response = await Http.GetAsync(uri);
 
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<Result<IEnumerable<FileSystemItem>>>();
-                if (result != null && result.IsSuccess && result.Value != null)
+                var result = await response.Content.ReadFromJsonAsync<PagedResult<FileSystemItem>>();
+                if (result?.Items != null)
                 {
-                    _folders = result.Value.Where(x => x.Type == FileSystemItemType.Folder).OrderBy(x => x.Name).ToList();
+                    _folders = result.Items
+                        .Where(x => x.Type == FileSystemItemType.Folder)
+                        .OrderBy(x => x.Name)
+                        .ToList();
                 }
             }
         }
         catch
         {
-            // Ignore
+            // Ignore — dialog stays usable even if a listing fails.
         }
         finally
         {
@@ -83,30 +101,21 @@
 
     private async Task NavigateUp()
     {
+        if (string.IsNullOrEmpty(_currentPath))
+        {
+            return;
+        }
+
+        string? parent = null;
         try
         {
-            var uri = $"api/fileexplorer/parent?path={Uri.EscapeDataString(_currentPath)}";
-            var response = await Http.GetAsync(uri);
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadFromJsonAsync<Result<string>>();
-                if (result != null && result.IsSuccess && result.Value != null)
-                {
-                    await LoadDirectoryAsync(result.Value);
-                }
-                else
-                {
-                    await LoadDirectoryAsync("");
-                }
-            }
-            else
-            {
-                await LoadDirectoryAsync("");
-            }
+            parent = System.IO.Path.GetDirectoryName(_currentPath);
         }
         catch
         {
-            await LoadDirectoryAsync("");
+            parent = null;
         }
+
+        await LoadDirectoryAsync(parent ?? string.Empty);
     }
 }

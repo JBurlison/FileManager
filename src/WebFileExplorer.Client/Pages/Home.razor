@@ -239,6 +239,7 @@
     private bool _isSearchResults = false;
     private bool _searchSubfolders = true;
     private System.Threading.CancellationTokenSource? _searchCts;
+    private readonly System.Threading.CancellationTokenSource _lifetimeCts = new();
     
     private RadzenDataGrid<FileSystemItem>? _dataGrid;
     private IList<FileSystemItem> _selectedItems = new List<FileSystemItem>();
@@ -692,22 +693,35 @@
                 {
                     var scrollPos = _pendingScrollPosition.Value;
                     _pendingScrollPosition = null;
-                    
-                    _ = Task.Run(async () =>
+
+                    // Schedule on the renderer so the callback is cancelled when the component
+                    // is disposed (via the linked cancellation token below). Avoids Task.Run fire-
+                    // and-forget that can execute JS interop after navigation.
+                    var token = _lifetimeCts.Token;
+                    _ = InvokeAsync(async () =>
                     {
-                        await Task.Delay(150);
                         try
                         {
+                            await Task.Delay(150, token);
+                            if (token.IsCancellationRequested) return;
+
                             if (_viewMode == "List")
                             {
-                                await JS.InvokeVoidAsync("eval", $"var el = document.querySelector('.rz-data-grid-data'); if (el) el.scrollTop = {scrollPos};");
+                                await JS.InvokeVoidAsync("eval", token, $"var el = document.querySelector('.rz-data-grid-data'); if (el) el.scrollTop = {scrollPos};");
                             }
                             else
                             {
-                                await JS.InvokeVoidAsync("eval", $"var el = document.getElementById('file-container'); if (el) el.scrollTop = {scrollPos};");
+                                await JS.InvokeVoidAsync("eval", token, $"var el = document.getElementById('file-container'); if (el) el.scrollTop = {scrollPos};");
                             }
                         }
-                        catch { }
+                        catch (OperationCanceledException)
+                        {
+                            // Component disposed or navigation occurred — expected.
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine($"Scroll restore failed: {ex.Message}");
+                        }
                     });
                 }
             }
@@ -1410,6 +1424,12 @@
     {
         CancelSearch();
         Clipboard.OnChange -= StateHasChanged;
+        try
+        {
+            _lifetimeCts.Cancel();
+        }
+        catch { }
+        _lifetimeCts.Dispose();
     }
 
     private void ClearSelection()

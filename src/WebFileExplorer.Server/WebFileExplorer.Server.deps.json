@@ -1,0 +1,125 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "WebFileExplorer.Server/1.0.0": {
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.WebAssembly.Server": "10.0.5",
+          "WebFileExplorer.Client": "1.0.0",
+          "WebFileExplorer.Shared": "1.0.0"
+        },
+        "runtime": {
+          "WebFileExplorer.Server.dll": {}
+        }
+      },
+      "Microsoft.AspNetCore.Components.WebAssembly/10.0.5": {
+        "dependencies": {
+          "Microsoft.JSInterop.WebAssembly": "10.0.5"
+        },
+        "runtime": {
+          "lib/net10.0/Microsoft.AspNetCore.Components.WebAssembly.dll": {
+            "assemblyVersion": "10.0.5.0",
+            "fileVersion": "10.0.526.15411"
+          }
+        }
+      },
+      "Microsoft.AspNetCore.Components.WebAssembly.Server/10.0.5": {
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.WebAssembly": "10.0.5"
+        },
+        "runtime": {
+          "lib/net10.0/Microsoft.AspNetCore.Components.WebAssembly.Server.dll": {
+            "assemblyVersion": "10.0.5.0",
+            "fileVersion": "10.0.526.15411"
+          }
+        }
+      },
+      "Microsoft.JSInterop.WebAssembly/10.0.5": {
+        "runtime": {
+          "lib/net10.0/Microsoft.JSInterop.WebAssembly.dll": {
+            "assemblyVersion": "10.0.5.0",
+            "fileVersion": "10.0.526.15411"
+          }
+        }
+      },
+      "Radzen.Blazor/10.2.0": {
+        "runtime": {
+          "lib/net10.0/Radzen.Blazor.dll": {
+            "assemblyVersion": "10.2.0.0",
+            "fileVersion": "10.2.0.0"
+          }
+        }
+      },
+      "WebFileExplorer.Client/1.0.0": {
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.WebAssembly": "10.0.5",
+          "Radzen.Blazor": "10.2.0",
+          "WebFileExplorer.Shared": "1.0.0"
+        },
+        "runtime": {
+          "WebFileExplorer.Client.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "WebFileExplorer.Shared/1.0.0": {
+        "runtime": {
+          "WebFileExplorer.Shared.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "WebFileExplorer.Server/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.AspNetCore.Components.WebAssembly/10.0.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-fjmhjvZpYTJVl/sxpDStP8+fQ6XEG8r9iuhafuTCp2nAAGPcJhsSND58he9BOekbxs6nMv2OECUGwtWqHBGFcg==",
+      "path": "microsoft.aspnetcore.components.webassembly/10.0.5",
+      "hashPath": "microsoft.aspnetcore.components.webassembly.10.0.5.nupkg.sha512"
+    },
+    "Microsoft.AspNetCore.Components.WebAssembly.Server/10.0.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-wDK4Yiuz9oq3LLO8ies4UzpRLGQ56WGHj099h0MzkFyU8YcaZJ9h76ZkBpcgJQPNECjxL0lXg4hQz2fhrt0qHQ==",
+      "path": "microsoft.aspnetcore.components.webassembly.server/10.0.5",
+      "hashPath": "microsoft.aspnetcore.components.webassembly.server.10.0.5.nupkg.sha512"
+    },
+    "Microsoft.JSInterop.WebAssembly/10.0.5": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-9iva1I1opPJA1xMSGTNmbyLhyzw383l6StST9gebB/UEBrYuadzwsv7O3eKAhmJVsPUGy6wWo4SVUcfFnPNQXA==",
+      "path": "microsoft.jsinterop.webassembly/10.0.5",
+      "hashPath": "microsoft.jsinterop.webassembly.10.0.5.nupkg.sha512"
+    },
+    "Radzen.Blazor/10.2.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-wsoRMxagjpouy4dCPqfcQMqwGm8KC8Q9BRIKp2bSPIN578XlMaOiq/ahVwpuR6s4Vgd2cCT/32IUaUytVy7MEA==",
+      "path": "radzen.blazor/10.2.0",
+      "hashPath": "radzen.blazor.10.2.0.nupkg.sha512"
+    },
+    "WebFileExplorer.Client/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "WebFileExplorer.Shared/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

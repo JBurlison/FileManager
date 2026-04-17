@@ -22,9 +22,10 @@ public static class NetworkBindingExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         var allowedPrefixes = GetAllowedPrefixes(configuration);
+        var allowList = new IpAllowList(allowedPrefixes);
         var port = configuration.GetValue<int?>(PortKey) ?? 5000;
 
-        if (TryFindBindingAddress(allowedPrefixes, out var bindingAddress))
+        if (TryFindBindingAddress(allowList, out var bindingAddress))
         {
             builder.UseUrls($"http://{bindingAddress}:{port}");
             return builder;
@@ -40,9 +41,14 @@ public static class NetworkBindingExtensions
         throw new InvalidOperationException($"FATAL ERROR: No network interfaces matching '{configuredPrefixes}' found. The application strictly requires a configured local network. Shutting down.");
     }
 
-    private static bool TryFindBindingAddress(string[] allowedPrefixes, out IPAddress bindingAddress)
+    private static bool TryFindBindingAddress(IpAllowList allowList, out IPAddress bindingAddress)
     {
         bindingAddress = IPAddress.None;
+
+        if (allowList.IsEmpty)
+        {
+            return false;
+        }
 
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
         {
@@ -54,13 +60,13 @@ public static class NetworkBindingExtensions
             foreach (var unicastAddress in networkInterface.GetIPProperties().UnicastAddresses)
             {
                 var address = unicastAddress.Address;
-                if (address.AddressFamily != AddressFamily.InterNetwork)
+                if (address.AddressFamily != AddressFamily.InterNetwork &&
+                    address.AddressFamily != AddressFamily.InterNetworkV6)
                 {
                     continue;
                 }
 
-                var ipString = address.ToString();
-                if (allowedPrefixes.Any(prefix => ipString.StartsWith(prefix, StringComparison.Ordinal)))
+                if (allowList.Matches(address))
                 {
                     bindingAddress = address;
                     return true;

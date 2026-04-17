@@ -11,7 +11,7 @@ public sealed class AllowedIPMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<AllowedIPMiddleware> _logger;
-    private readonly string[] _allowedPrefixes;
+    private readonly IpAllowList _allowList;
     private readonly bool _allowLoopback;
 
     public AllowedIPMiddleware(
@@ -22,7 +22,7 @@ public sealed class AllowedIPMiddleware
     {
         _next = next;
         _logger = logger;
-        _allowedPrefixes = GetAllowedPrefixes(configuration);
+        _allowList = new IpAllowList(GetAllowedPrefixes(configuration));
         _allowLoopback = environment.IsDevelopment();
     }
 
@@ -43,18 +43,10 @@ public sealed class AllowedIPMiddleware
             return;
         }
 
-        var candidateIp = remoteIp.AddressFamily == AddressFamily.InterNetworkV6 && remoteIp.IsIPv4MappedToIPv6
-            ? remoteIp.MapToIPv4()
-            : remoteIp;
-
-        if (candidateIp.AddressFamily == AddressFamily.InterNetwork)
+        if (_allowList.Matches(remoteIp))
         {
-            var ipString = candidateIp.ToString();
-            if (_allowedPrefixes.Any(prefix => ipString.StartsWith(prefix, StringComparison.Ordinal)))
-            {
-                await _next(context);
-                return;
-            }
+            await _next(context);
+            return;
         }
 
         _logger.LogWarning("Blocking request from remote IP address {RemoteIpAddress}.", remoteIp);
@@ -72,9 +64,9 @@ public sealed class AllowedIPMiddleware
         var prefixes = configuration.GetSection("NetworkBinding:AllowedPrefixes").Get<string[]>();
         if (prefixes is { Length: > 0 })
         {
-            return prefixes.Where(prefix => !string.IsNullOrWhiteSpace(prefix)).ToArray();
+            return prefixes.Where(p => !string.IsNullOrWhiteSpace(p)).ToArray();
         }
 
-        return string.IsNullOrWhiteSpace(prefix) ? [] : [prefix];
+        return [];
     }
 }

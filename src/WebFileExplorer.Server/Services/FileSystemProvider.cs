@@ -45,19 +45,20 @@ public class FileSystemProvider : IFileSystemProvider
     private void EnsureAuthorizedPath(string path)
     {
         var fullPath = Path.GetFullPath(path);
-        
+        var canonicalPath = ResolveFinalPath(fullPath);
+
         if (_options.AuthorizedRoots == null || _options.AuthorizedRoots.Length == 0)
         {
             throw new UnauthorizedAccessException("No authorized roots are configured.");
         }
 
         bool authorized = false;
-        var pathWithSlash = EnsureTrailingSlash(fullPath);
+        var pathWithSlash = EnsureTrailingSlash(canonicalPath);
         
         foreach (var root in _options.AuthorizedRoots)
         {
-            var fullRoot = Path.GetFullPath(root);
-            
+            var fullRoot = ResolveFinalPath(Path.GetFullPath(root));
+
             // Ensure trailing slash for exact prefix matching
             var rootWithSlash = EnsureTrailingSlash(fullRoot);
             
@@ -72,6 +73,52 @@ public class FileSystemProvider : IFileSystemProvider
         {
             _logger.LogWarning("Access denied to unauthorized path: {Path}", fullPath);
             throw new UnauthorizedAccessException($"Access to the path '{fullPath}' is denied.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves reparse points (junctions, symlinks) in the supplied path to their real filesystem
+    /// target, walking up the directory tree from the deepest existing ancestor. This prevents a
+    /// junction inside an authorized root from silently redirecting operations outside that root.
+    /// </summary>
+    private static string ResolveFinalPath(string fullPath)
+    {
+        try
+        {
+            // Walk up until we find an existing ancestor so we can resolve links on it.
+            var candidate = fullPath;
+            var tail = string.Empty;
+
+            while (!string.IsNullOrEmpty(candidate) && !Directory.Exists(candidate) && !File.Exists(candidate))
+            {
+                var parent = Path.GetDirectoryName(candidate);
+                if (string.IsNullOrEmpty(parent) || parent == candidate)
+                {
+                    return fullPath;
+                }
+                tail = tail.Length == 0
+                    ? Path.GetFileName(candidate)
+                    : Path.Combine(Path.GetFileName(candidate), tail);
+                candidate = parent;
+            }
+
+            FileSystemInfo info = Directory.Exists(candidate)
+                ? new DirectoryInfo(candidate)
+                : new FileInfo(candidate);
+
+            // Follow link targets recursively; LinkTarget is null for non-reparse items.
+            var resolved = info.ResolveLinkTarget(returnFinalTarget: true);
+            var resolvedPath = resolved?.FullName ?? info.FullName;
+
+            return string.IsNullOrEmpty(tail)
+                ? Path.GetFullPath(resolvedPath)
+                : Path.GetFullPath(Path.Combine(resolvedPath, tail));
+        }
+        catch
+        {
+            // On any resolution failure, fall back to the lexical path. The caller will still enforce
+            // the prefix check; worst case we deny a borderline path.
+            return fullPath;
         }
     }
 
@@ -713,10 +760,15 @@ return new WebFileExplorer.Shared.Models.PagedResult<FileSystemItem> { Items = S
                     MatchCasing = MatchCasing.CaseInsensitive
                 };
                 
-                string searchPattern = $"*{query}*";
+                // Enumerate with a literal "*" and filter in-memory so glob metacharacters
+                // ('*' and '?') in the user-supplied query cannot change search semantics
+                // or trigger ArgumentException from the enumerator.
+                const string searchPattern = "*";
 
                 var dirs = directoryInfo.EnumerateDirectories(searchPattern, options)
-                    .Where(dir => showHidden || (dir.Attributes & FileAttributes.Hidden) == 0)
+                    .Where(dir =>
+                        (showHidden || (dir.Attributes & FileAttributes.Hidden) == 0)
+                        && dir.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
                     .Select(dir => 
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -731,7 +783,9 @@ return new WebFileExplorer.Shared.Models.PagedResult<FileSystemItem> { Items = S
                     });
 
                 var files = directoryInfo.EnumerateFiles(searchPattern, options)
-                    .Where(file => showHidden || (file.Attributes & FileAttributes.Hidden) == 0)
+                    .Where(file =>
+                        (showHidden || (file.Attributes & FileAttributes.Hidden) == 0)
+                        && file.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
                     .Select(file => 
                     {
                         cancellationToken.ThrowIfCancellationRequested();

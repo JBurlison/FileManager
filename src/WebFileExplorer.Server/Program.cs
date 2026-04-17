@@ -23,10 +23,13 @@ if (app.Environment.IsDevelopment())
     app.UseWebAssemblyDebugging();
 }
 
+// IP allow-list must run before serving static client assets so unauthorized
+// callers cannot retrieve the Blazor WASM payload either.
+app.UseMiddleware<AllowedIPMiddleware>();
+
 app.UseBlazorFrameworkFiles();
 app.MapStaticAssets();
 
-app.UseMiddleware<AllowedIPMiddleware>();
 app.UseRouting();
 app.MapRazorPages();
 app.MapControllers();

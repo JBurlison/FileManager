@@ -73,15 +73,14 @@ public class PreviewDialogTests : BunitContext
     [TestMethod]
     public void PreviewDialog_LargeFile_ShowsSizeWarning()
     {
-        // Arrange
+        // Arrange — return a body noticeably larger than the 100 KB preview cutoff.
+        var largeBody = new string('x', 150 * 1024);
         _mockHandler = request =>
         {
-            var response = new HttpResponseMessage(HttpStatusCode.OK);
-            var content = new StringContent("");
-            content.Headers.Clear();
-            content.Headers.Add("Content-Length", (10 * 1024 * 1024).ToString()); // 10 MB
-            response.Content = content;
-            return response;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(largeBody)
+            };
         };
 
         // Act
@@ -95,6 +94,9 @@ public class PreviewDialogTests : BunitContext
         var textArea = cut.Find("textarea");
         Assert.IsNotNull(textArea);
         StringAssert.Contains(textArea.TextContent, "Preview truncated at 100KB");
+        // Preview body itself must stay at or below the cutoff.
+        Assert.IsTrue(textArea.TextContent.Length < largeBody.Length,
+            "Preview should be truncated below the full body size.");
     }
 
     [TestMethod]
