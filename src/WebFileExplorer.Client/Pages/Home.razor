@@ -29,11 +29,11 @@
 
     <div class="wfe-breadcrumb-container d-flex align-items-center" style="flex: 1;">
         <RadzenButton Icon="arrow_upward" Click="@NavigateUp" Disabled="@(string.IsNullOrEmpty(_currentPath))" Class="rz-mr-2" title="Up" aria-label="Navigate Up" />
-        <RadzenTextBox @bind-Value="@_addressInput" style="flex: 1" class="rz-mr-2" @onkeyup="@OnAddressKeyUp" aria-label="Address" />
+        <RadzenTextBox id="address-input" @bind-Value="@_addressInput" style="flex: 1" class="rz-mr-2" @onkeyup="@OnAddressKeyUp" aria-label="Address" />
         <RadzenButton Icon="keyboard_return" Click="@NavigateToAddress" title="Go" Class="rz-mr-4" />
     </div>
 
-    <RadzenTextBox @bind-Value="@_searchInput" class="rz-mr-2" Placeholder="Search..." @onkeyup="@OnSearchKeyUp" style="width: 150px;" Disabled="@(string.IsNullOrEmpty(_currentPath))" aria-label="Search items" />
+    <RadzenTextBox id="search-input" @bind-Value="@_searchInput" class="rz-mr-2" Placeholder="Search..." @onkeyup="@OnSearchKeyUp" style="width: 150px;" Disabled="@(string.IsNullOrEmpty(_currentPath))" aria-label="Search items" />
     <RadzenCheckBox @bind-Value=@_searchSubfolders Name="cbSearchSubfolders" Class="rz-mr-2" />
     <RadzenLabel Text="Subfolders" Component="cbSearchSubfolders" Class="rz-mr-2" />
     @if (_isSearching)
@@ -119,6 +119,7 @@
                                 RowDoubleClick="@OnRowDoubleClick" RowSelect="@OnRowSelect"
                                 RowRender="@OnRowRender"
                                 AllowSorting="true" Style="height: 100%"
+                                AllowRowSelectOnRowClick="false"
                                 AllowVirtualization="true"
                                 SelectionMode="DataGridSelectionMode.Multiple"
                                 @bind-Value=@_selectedItems>
@@ -432,6 +433,18 @@
         if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_searchInput) && !string.IsNullOrEmpty(_currentPath))
         {
             await PerformSearch();
+        }
+    }
+
+    private async Task FocusExplorerInputAsync(string elementId)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("focusFileExplorerElement", elementId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to focus explorer input {ElementId}.", elementId);
         }
     }
 
@@ -855,13 +868,13 @@
     }
 
     private bool IsRecycleBin => _currentPath?.Equals("::RecycleBin::", StringComparison.OrdinalIgnoreCase) == true;
-    private bool CanRestore => IsRecycleBin && (_selectedItems.Count > 0 || _focusedItem != null);
+    private bool CanRestore => IsRecycleBin && HasActiveItem;
     
     private async Task RestoreSelected()
     {
         if (!CanRestore) return;
         
-        var itemsToRestore = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        var itemsToRestore = GetActiveItems();
         
         _isLoading = true;
         StateHasChanged();
@@ -926,18 +939,25 @@
         }
     }
 
+    private bool HasActiveItem => _selectedItems.Count > 0 || _focusedItem != null;
     private bool CanRename => _selectedItems.Count == 1 || (_selectedItems.Count == 0 && _focusedItem != null);
-    private bool CanDelete => _selectedItems.Count > 0 || _focusedItem != null;
-    private bool CanCompress => _selectedItems.Count > 0 || _focusedItem != null;
+    private bool CanDelete => HasActiveItem;
+    private bool CanCompress => HasActiveItem;
     private bool CanExtract => GetSingleZipItem() != null;
+
+    private List<FileSystemItem> GetActiveItems()
+    {
+        return _selectedItems.Count > 0
+            ? _selectedItems.ToList()
+            : _focusedItem != null ? new List<FileSystemItem> { _focusedItem } : new List<FileSystemItem>();
+    }
 
     private FileSystemItem? GetSingleZipItem()
     {
-        if (_selectedItems.Count == 1 && _selectedItems[0].Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            return _selectedItems[0];
-        if (_selectedItems.Count == 0 && _focusedItem != null && _focusedItem.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            return _focusedItem;
-        return null;
+        var activeItems = GetActiveItems();
+        return activeItems.Count == 1 && activeItems[0].Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            ? activeItems[0]
+            : null;
     }
 
     private async Task CreateFolderDialog()
@@ -1040,7 +1060,7 @@
     {
         if (!CanCompress) return;
 
-        var itemsToCompress = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        var itemsToCompress = GetActiveItems();
         var defaultZipName = itemsToCompress.Count == 1 ? $"{itemsToCompress[0].Name}.zip" : "Archive.zip";
         var zipNameInput = "";
 
@@ -1183,7 +1203,7 @@
     {
         if (!CanDelete) return;
 
-        var itemsToDelete = _selectedItems.Count > 0 ? _selectedItems.ToList() : new List<FileSystemItem> { _focusedItem! };
+        var itemsToDelete = GetActiveItems();
         
         var title = permanent ? "Permanently Delete Items" : "Delete Items";
         var confirmMsg = "";
@@ -1272,8 +1292,8 @@
         }
     }
 
-        private bool CanCut => _selectedItems.Any();
-    private bool CanCopy => _selectedItems.Any();
+    private bool CanCut => HasActiveItem;
+    private bool CanCopy => HasActiveItem;
     private bool CanPaste => !string.IsNullOrEmpty(_currentPath) && Clipboard.Items.Any();
 
     private bool IsGhosted(FileSystemItem item) 
@@ -1283,8 +1303,21 @@
         return isClipboardCut || isDragged;
     }
 
-    private void CutSelected() => Clipboard.SetState(true, _selectedItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
-    private void CopySelected() => Clipboard.SetState(false, _selectedItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
+    private void CutSelected()
+    {
+        var activeItems = GetActiveItems();
+        if (!activeItems.Any()) return;
+
+        Clipboard.SetState(true, activeItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
+    }
+
+    private void CopySelected()
+    {
+        var activeItems = GetActiveItems();
+        if (!activeItems.Any()) return;
+
+        Clipboard.SetState(false, activeItems.Select(x => x.FullPath), _currentPath ?? string.Empty);
+    }
 
     private async Task PasteItems()
     {
@@ -1504,12 +1537,23 @@
 
     private void OnItemClick(Microsoft.AspNetCore.Components.Web.MouseEventArgs args, FileSystemItem item)
     {
+        ApplyMouseSelection(args.CtrlKey, args.ShiftKey, item);
+    }
+
+    private void ApplyMouseSelection(bool ctrlKey, bool shiftKey, FileSystemItem item)
+    {
         _focusedItem = item;
 
         if (_currentItems == null) return;
         var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
 
-        if (args.CtrlKey)
+        if (shiftKey && _lastClickedItem != null && itemsList.Contains(_lastClickedItem))
+        {
+            SelectRange(itemsList, _lastClickedItem, item);
+            return;
+        }
+
+        if (ctrlKey)
         {
             if (_selectedItems.Contains(item))
             {
@@ -1519,28 +1563,11 @@
             {
                 _selectedItems.Add(item);
             }
-        }
-        else if (args.ShiftKey && _lastClickedItem != null)
-        {
-            int start = itemsList.IndexOf(_lastClickedItem);
-            int end = itemsList.IndexOf(item);
-            if (start != -1 && end != -1)
-            {
-                int min = Math.Min(start, end);
-                int max = Math.Max(start, end);
-                _selectedItems.Clear();
-                for (int i = min; i <= max; i++)
-                {
-                    _selectedItems.Add(itemsList[i]);
-                }
-            }
-        }
-        else
-        {
-            _selectedItems.Clear();
-            _selectedItems.Add(item);
             _lastClickedItem = item;
+            return;
         }
+
+        SelectOnly(item);
     }
 
     public class TreeNodeObj
@@ -1700,6 +1727,7 @@
     {
         if (args.Data != null)
         {
+            args.Attributes.Add("onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, e => ApplyMouseSelection(e.CtrlKey, e.ShiftKey, args.Data)));
             args.Attributes.Add("oncontextmenu", Microsoft.AspNetCore.Components.EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, e => OnContextMenu(e, args.Data)));
             args.Attributes.Add("oncontextmenu:preventDefault", true);
             args.Attributes.Add("oncontextmenu:stopPropagation", true);
@@ -1762,74 +1790,86 @@
 
     private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args)
     {
-        if (_currentItems == null || !_currentItems.Any()) return;
+        var key = args.Key ?? string.Empty;
+        if (string.IsNullOrEmpty(key)) return;
 
-        var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
-        
-        if (string.Equals(args.Key, "f5", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrEmpty(_currentPath)) {
-                await LoadDirectoryAsync(_currentPath);
-            }
-            return;
-        }
-
-        if (string.Equals(args.Key, "f2", StringComparison.OrdinalIgnoreCase))
-        {
-            await RenameDialog();
-            return;
-        }
-        
-        if (args.CtrlKey && string.Equals(args.Key, "c", StringComparison.OrdinalIgnoreCase))
-        {
-            CopySelected();
-            return;
-        }
-        
-        if (args.CtrlKey && string.Equals(args.Key, "x", StringComparison.OrdinalIgnoreCase))
-        {
-            CutSelected();
-            return;
-        }
-        
-        if (args.CtrlKey && string.Equals(args.Key, "v", StringComparison.OrdinalIgnoreCase))
-        {
-            await PasteItems();
-            return;
-        }
-
-        if (args.CtrlKey && args.ShiftKey && string.Equals(args.Key, "n", StringComparison.OrdinalIgnoreCase))
+        if (args.CtrlKey && args.ShiftKey && KeyEquals(key, "n"))
         {
             await CreateFolderDialog();
             return;
         }
 
-        if (args.AltKey && string.Equals(args.Key, "arrowleft", StringComparison.OrdinalIgnoreCase))
+        if ((args.CtrlKey && KeyEquals(key, "l")) || (args.AltKey && KeyEquals(key, "d")))
+        {
+            await FocusExplorerInputAsync("address-input");
+            return;
+        }
+
+        if ((args.CtrlKey && (KeyEquals(key, "f") || KeyEquals(key, "e"))) || KeyEquals(key, "f3"))
+        {
+            await FocusExplorerInputAsync("search-input");
+            return;
+        }
+
+        if (KeyEquals(key, "f5"))
+        {
+            if (!string.IsNullOrEmpty(_currentPath))
+            {
+                await LoadDirectoryAsync(_currentPath);
+            }
+            return;
+        }
+
+        if (args.AltKey && KeyEquals(key, "arrowleft"))
         {
             await NavigateBack();
             return;
         }
 
-        if (args.AltKey && string.Equals(args.Key, "arrowright", StringComparison.OrdinalIgnoreCase))
+        if (args.AltKey && KeyEquals(key, "arrowright"))
         {
             await NavigateForward();
             return;
         }
 
-        if (string.Equals(args.Key, "backspace", StringComparison.OrdinalIgnoreCase))
-        {
-            await NavigateBack();
-            return;
-        }
-
-        if (args.AltKey && string.Equals(args.Key, "arrowup", StringComparison.OrdinalIgnoreCase))
+        if (args.AltKey && KeyEquals(key, "arrowup"))
         {
             await NavigateUp();
             return;
         }
 
-        if ((args.ShiftKey && string.Equals(args.Key, "f10", StringComparison.OrdinalIgnoreCase)) ||
-            string.Equals(args.Key, "ContextMenu", StringComparison.OrdinalIgnoreCase))
+        if (KeyEquals(key, "backspace"))
+        {
+            await NavigateBack();
+            return;
+        }
+
+        if (args.CtrlKey && KeyEquals(key, "v"))
+        {
+            await PasteItems();
+            return;
+        }
+
+        if (KeyEquals(key, "escape"))
+        {
+            CancelSearch();
+            ClearSelection();
+            _typeBuffer = "";
+            StateHasChanged();
+            return;
+        }
+
+        if (_currentItems == null) return;
+
+        var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
+
+        if (args.CtrlKey && KeyEquals(key, "a"))
+        {
+            SelectAllItems(itemsList);
+            return;
+        }
+
+        if ((args.ShiftKey && KeyEquals(key, "f10")) || KeyEquals(key, "ContextMenu"))
         {
             if (_focusedItem != null)
             {
@@ -1842,115 +1882,218 @@
             return;
         }
 
-        if (args.Key == "Delete")
+        if (args.CtrlKey && KeyEquals(key, "c"))
+        {
+            CopySelected();
+            return;
+        }
+
+        if (args.CtrlKey && KeyEquals(key, "x"))
+        {
+            CutSelected();
+            return;
+        }
+
+        if (args.CtrlKey && KeyEquals(key, "d"))
+        {
+            await DeleteSelected(false);
+            return;
+        }
+
+        if (KeyEquals(key, "f2"))
+        {
+            await RenameDialog();
+            return;
+        }
+
+        if (args.AltKey && KeyEquals(key, "enter"))
+        {
+            var item = _selectedItems.FirstOrDefault() ?? _focusedItem;
+            if (item != null)
+            {
+                await ShowPropertiesDialogAsync(item);
+            }
+            return;
+        }
+
+        if (KeyEquals(key, "delete"))
         {
             await DeleteSelected(args.ShiftKey);
             return;
         }
-        
-        if (args.Key == "Enter" && _focusedItem != null)
+
+        if (KeyEquals(key, "enter") && _focusedItem != null)
         {
             await OnItemDoubleClick(_focusedItem);
             return;
         }
-        
-        if (args.CtrlKey && string.Equals(args.Key, "a", StringComparison.OrdinalIgnoreCase))
+
+        if (IsSpaceKey(key))
         {
-            _selectedItems.Clear();
-            if (_selectedItems is List<FileSystemItem> list)
+            if (_focusedItem == null && itemsList.Count > 0)
             {
-                list.AddRange(itemsList);
+                _focusedItem = itemsList[0];
             }
-            else
+
+            if (_focusedItem != null)
             {
-                foreach (var item in itemsList)
+                if (args.CtrlKey)
                 {
-                    _selectedItems.Add(item);
+                    ToggleFocusedSelection();
+                }
+                else
+                {
+                    SelectOnly(_focusedItem);
                 }
             }
             return;
         }
 
-        int columns = _viewMode == "Details" || _viewMode == "List" ? ColumnsDefaultList 
-            : (_viewMode == "SmallIcons" ? ColumnsSmallIcons 
-            : (_viewMode == "MediumIcons" ? ColumnsMediumIcons : ColumnsLargeIcons));
-        
-        if (args.Key is "ArrowUp" or "ArrowDown" or "ArrowLeft" or "ArrowRight" or "Home" or "End" or "PageUp" or "PageDown")
+        if (itemsList.Count == 0) return;
+
+        if (IsNavigationKey(key))
         {
-            if (_focusedItem == null)
-            {
-                _focusedItem = itemsList.First();
-                if (!args.ShiftKey)
-                {
-                    _lastClickedItem = _focusedItem;
-                    _selectedItems.Clear();
-                    _selectedItems.Add(_focusedItem);
-                }
-            }
-            else
-            {
-                int currentIndex = itemsList.IndexOf(_focusedItem);
-                int nextIndex = currentIndex;
-
-                if (args.Key == "ArrowUp") nextIndex = Math.Max(0, currentIndex - columns);
-                if (args.Key == "ArrowDown") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + columns);
-                if (args.Key == "ArrowLeft") nextIndex = Math.Max(0, currentIndex - 1);
-                if (args.Key == "ArrowRight") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + 1);
-                if (args.Key == "Home") nextIndex = 0;
-                if (args.Key == "End") nextIndex = itemsList.Count - 1;
-                
-                // Roughly 5 rows per page skip
-                int pageSize = columns * 5;
-                if (args.Key == "PageUp") nextIndex = Math.Max(0, currentIndex - pageSize);
-                if (args.Key == "PageDown") nextIndex = Math.Min(itemsList.Count - 1, currentIndex + pageSize);
-
-                if (nextIndex != currentIndex)
-                {
-                    _focusedItem = itemsList[nextIndex];
-
-                    if (args.ShiftKey)
-                    {
-                        if (_lastClickedItem == null) _lastClickedItem = itemsList[currentIndex];
-                        
-                        int start = itemsList.IndexOf(_lastClickedItem);
-                        int end = itemsList.IndexOf(_focusedItem);
-                        int min = Math.Min(start, end);
-                        int max = Math.Max(start, end);
-                        
-                        _selectedItems.Clear();
-                        for (int i = min; i <= max; i++)
-                        {
-                            _selectedItems.Add(itemsList[i]);
-                        }
-                    }
-                    else
-                    {
-                        _lastClickedItem = _focusedItem;
-                        _selectedItems.Clear();
-                        _selectedItems.Add(_focusedItem);
-                    }
-                }
-            }
+            MoveKeyboardFocus(args, itemsList, key);
             return;
         }
 
-        if (args.Key.Length == 1 && !args.CtrlKey && !args.AltKey)
+        if (key.Length == 1 && !args.CtrlKey && !args.AltKey && !args.MetaKey && !string.IsNullOrWhiteSpace(key))
         {
             if ((DateTime.Now - _lastTypeTime).TotalMilliseconds > 1000)
             {
                 _typeBuffer = "";
             }
-            _typeBuffer += args.Key.ToLower();
+            _typeBuffer += key.ToLowerInvariant();
             _lastTypeTime = DateTime.Now;
 
-            var match = itemsList.FirstOrDefault(i => i.Name.ToLower().StartsWith(_typeBuffer));
+            var match = itemsList.FirstOrDefault(item => item.Name.ToLowerInvariant().StartsWith(_typeBuffer));
             if (match != null)
             {
-                _focusedItem = match;
-                _lastClickedItem = match;
-                _selectedItems.Clear();
-                _selectedItems.Add(match);
+                SelectOnly(match);
             }
+        }
+    }
+
+    private static bool KeyEquals(string actual, string expected)
+    {
+        return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSpaceKey(string key)
+    {
+        return key == " " || KeyEquals(key, "space") || KeyEquals(key, "spacebar");
+    }
+
+    private static bool IsNavigationKey(string key)
+    {
+        return KeyEquals(key, "ArrowUp") || KeyEquals(key, "ArrowDown") || KeyEquals(key, "ArrowLeft") ||
+            KeyEquals(key, "ArrowRight") || KeyEquals(key, "Home") || KeyEquals(key, "End") ||
+            KeyEquals(key, "PageUp") || KeyEquals(key, "PageDown");
+    }
+
+    private void SelectAllItems(IList<FileSystemItem> itemsList)
+    {
+        _selectedItems.Clear();
+        foreach (var item in itemsList)
+        {
+            _selectedItems.Add(item);
+        }
+
+        if (itemsList.Count > 0)
+        {
+            _focusedItem ??= itemsList[0];
+            _lastClickedItem ??= _focusedItem;
+        }
+    }
+
+    private void SelectOnly(FileSystemItem item)
+    {
+        _focusedItem = item;
+        _lastClickedItem = item;
+        _selectedItems.Clear();
+        _selectedItems.Add(item);
+    }
+
+    private void ToggleFocusedSelection()
+    {
+        if (_focusedItem == null) return;
+
+        if (_selectedItems.Contains(_focusedItem))
+        {
+            _selectedItems.Remove(_focusedItem);
+        }
+        else
+        {
+            _selectedItems.Add(_focusedItem);
+        }
+
+        _lastClickedItem = _focusedItem;
+    }
+
+    private void MoveKeyboardFocus(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args, IList<FileSystemItem> itemsList, string key)
+    {
+        if (_focusedItem == null || !itemsList.Contains(_focusedItem))
+        {
+            _focusedItem = itemsList[0];
+            if (!args.CtrlKey || args.ShiftKey)
+            {
+                SelectOnly(_focusedItem);
+            }
+            return;
+        }
+
+        var currentIndex = itemsList.IndexOf(_focusedItem);
+        var nextIndex = GetNextKeyboardFocusIndex(itemsList.Count, currentIndex, key);
+        if (nextIndex == currentIndex) return;
+
+        var anchorItem = _lastClickedItem ?? itemsList[currentIndex];
+        _focusedItem = itemsList[nextIndex];
+
+        if (args.ShiftKey)
+        {
+            SelectRange(itemsList, anchorItem, _focusedItem);
+            return;
+        }
+
+        if (!args.CtrlKey)
+        {
+            SelectOnly(_focusedItem);
+        }
+    }
+
+    private int GetNextKeyboardFocusIndex(int itemCount, int currentIndex, string key)
+    {
+        var columns = _viewMode == "Details" || _viewMode == "List" ? ColumnsDefaultList
+            : _viewMode == "SmallIcons" ? ColumnsSmallIcons
+            : _viewMode == "MediumIcons" ? ColumnsMediumIcons : ColumnsLargeIcons;
+
+        var pageSize = columns * 5;
+
+        if (KeyEquals(key, "ArrowUp")) return Math.Max(0, currentIndex - columns);
+        if (KeyEquals(key, "ArrowDown")) return Math.Min(itemCount - 1, currentIndex + columns);
+        if (KeyEquals(key, "ArrowLeft")) return Math.Max(0, currentIndex - 1);
+        if (KeyEquals(key, "ArrowRight")) return Math.Min(itemCount - 1, currentIndex + 1);
+        if (KeyEquals(key, "Home")) return 0;
+        if (KeyEquals(key, "End")) return itemCount - 1;
+        if (KeyEquals(key, "PageUp")) return Math.Max(0, currentIndex - pageSize);
+        if (KeyEquals(key, "PageDown")) return Math.Min(itemCount - 1, currentIndex + pageSize);
+
+        return currentIndex;
+    }
+
+    private void SelectRange(IList<FileSystemItem> itemsList, FileSystemItem anchorItem, FileSystemItem focusedItem)
+    {
+        var start = itemsList.IndexOf(anchorItem);
+        var end = itemsList.IndexOf(focusedItem);
+        if (start < 0 || end < 0) return;
+
+        var min = Math.Min(start, end);
+        var max = Math.Max(start, end);
+
+        _selectedItems.Clear();
+        for (var index = min; index <= max; index++)
+        {
+            _selectedItems.Add(itemsList[index]);
         }
     }
 

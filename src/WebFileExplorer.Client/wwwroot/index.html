@@ -32,31 +32,111 @@
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script src="_content/Radzen.Blazor/Radzen.Blazor#[.{fingerprint}].js"></script>
     <script>
+        window.focusFileExplorerElement = (elementId) => {
+            const element = document.getElementById(elementId);
+            if (!element) {
+                return;
+            }
+
+            element.focus({ preventScroll: true });
+            if (typeof element.select === 'function') {
+                element.select();
+            }
+        };
+
         window.registerKeyboardInterceptor = (elementId) => {
             const element = document.getElementById(elementId);
-            if (element) {
-                if (element._keyboardInterceptor) {
-                    element.removeEventListener('keydown', element._keyboardInterceptor);
-                }
-                
-                element._keyboardInterceptor = function(e) {
-                    // Stop default browser behavior for shortcuts that we want Blazor to handle.
-                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
-                        return; // Let inputs work normally
-                    }
-                    
-                    const key = e.key.toLowerCase();
-                    if ((e.ctrlKey && (key === 'a' || key === 'c' || key === 'x' || key === 'v')) ||
-                        (e.ctrlKey && e.shiftKey && key === 'n') ||
-                        key === 'f5' || key === 'f2' || key === 'delete' || key === 'backspace' ||
-                        key === 'home' || key === 'end' || key === 'pageup' || key === 'pagedown' || key === 'contextmenu' ||
-                        (e.altKey && (key === 'arrowleft' || key === 'arrowright' || key === 'arrowup'))) {
-                        e.preventDefault();
-                    }
-                };
-                
-                element.addEventListener('keydown', element._keyboardInterceptor);
+            if (!element) {
+                return;
             }
+
+            window.fileExplorerKeyboardInterceptors ??= {};
+            const existingInterceptor = window.fileExplorerKeyboardInterceptors[elementId];
+            if (existingInterceptor) {
+                document.removeEventListener('keydown', existingInterceptor, true);
+            }
+
+            const isElement = (target) => target instanceof Element;
+            const isEditableTarget = (target) => isElement(target) &&
+                (target.closest('input, textarea, select, [contenteditable="true"]') || target.isContentEditable);
+            const isInteractiveTarget = (target) => isElement(target) &&
+                target.closest('button, a[href], [role="button"], .rz-button');
+            const isDialogTarget = (target) => isElement(target) &&
+                target.closest('.rz-dialog, .rz-dialog-wrapper, .rz-context-menu, [role="dialog"]');
+            const hasOpenOverlay = () => document.querySelector('.rz-dialog, .rz-dialog-wrapper, .rz-context-menu, [role="dialog"]') !== null;
+
+            const shouldHandleKey = (event) => {
+                const key = event.key.toLowerCase();
+                const isPrintable = event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey;
+                const isNavigationKey = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright' ||
+                    key === 'home' || key === 'end' || key === 'pageup' || key === 'pagedown';
+                const isCtrlShortcut = event.ctrlKey && (key === 'a' || key === 'c' || key === 'd' || key === 'e' ||
+                    key === 'f' || key === 'l' || key === 'x' || key === 'v');
+                const isAltShortcut = event.altKey && (key === 'arrowleft' || key === 'arrowright' || key === 'arrowup' ||
+                    key === 'd' || key === 'enter');
+
+                return isPrintable || isNavigationKey || isCtrlShortcut || isAltShortcut ||
+                    (event.ctrlKey && event.shiftKey && key === 'n') ||
+                    (event.shiftKey && key === 'f10') ||
+                    key === 'f2' || key === 'f3' || key === 'f5' || key === 'delete' || key === 'backspace' ||
+                    key === 'enter' || key === 'escape' || key === 'contextmenu';
+            };
+
+            const createForwardedEvent = (event) => {
+                const forwardedEvent = new KeyboardEvent('keydown', {
+                    key: event.key,
+                    code: event.code,
+                    location: event.location,
+                    ctrlKey: event.ctrlKey,
+                    shiftKey: event.shiftKey,
+                    altKey: event.altKey,
+                    metaKey: event.metaKey,
+                    repeat: event.repeat,
+                    bubbles: true,
+                    cancelable: true
+                });
+                Object.defineProperty(forwardedEvent, 'fileExplorerForwarded', { value: true });
+                return forwardedEvent;
+            };
+
+            const interceptor = (event) => {
+                if (!document.body.contains(element)) {
+                    document.removeEventListener('keydown', interceptor, true);
+                    delete window.fileExplorerKeyboardInterceptors[elementId];
+                    return;
+                }
+
+                if (event.fileExplorerForwarded || !shouldHandleKey(event)) {
+                    return;
+                }
+
+                if (isEditableTarget(event.target) || isDialogTarget(event.target)) {
+                    return;
+                }
+
+                if (hasOpenOverlay()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+
+                const eventStartedInsideFileView = element.contains(event.target);
+                if (!eventStartedInsideFileView && isInteractiveTarget(event.target)) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                if (eventStartedInsideFileView) {
+                    return;
+                }
+
+                element.focus({ preventScroll: true });
+                element.dispatchEvent(createForwardedEvent(event));
+            };
+
+            window.fileExplorerKeyboardInterceptors[elementId] = interceptor;
+            document.addEventListener('keydown', interceptor, true);
         };
     </script>
 </body>

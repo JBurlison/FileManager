@@ -205,11 +205,53 @@ public class HomePhase3Tests : BunitContext
         Assert.IsGreaterThanOrEqualTo(3, items.Count, "Expected 3 items rendered.");
 
         items[0].Click(new Microsoft.AspNetCore.Components.Web.MouseEventArgs { ShiftKey = false });
+        items = cut.FindAll(".custom-view-item");
         items[2].Click(new Microsoft.AspNetCore.Components.Web.MouseEventArgs { ShiftKey = true });
 
         // Assert
         var selectedItems = cut.FindAll(".custom-view-item.selected");
         Assert.HasCount(3, selectedItems, "Expected all 3 items to be selected via Shift+Click.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Home_DetailsView_ShiftClick_SelectsRange()
+    {
+        // Arrange
+        var mockHttp = (HttpRequestMessage req) =>
+        {
+            if (req.RequestUri!.PathAndQuery.Contains("api/fileexplorer/list?path=C%3A%5C"))
+            {
+                var items = new PagedResult<FileSystemItem>
+                {
+                    Items =
+                    [
+                        new FileSystemItem("File1.txt", "C:\\File1.txt", FileSystemItemType.File, 100, DateTime.Now, false),
+                        new FileSystemItem("File2.txt", "C:\\File2.txt", FileSystemItemType.File, 100, DateTime.Now, false),
+                        new FileSystemItem("File3.txt", "C:\\File3.txt", FileSystemItemType.File, 100, DateTime.Now, false)
+                    ]
+                };
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(items)) };
+            }
+            return null!;
+        };
+        var cut = SetupAndRender(mockHttp);
+
+        cut.InvokeAsync(() => typeof(WebFileExplorer.Client.Pages.Home).GetMethod("LoadDirectoryAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(cut.Instance, new object[] { "C:\\" }));
+        cut.WaitForState(() => cut.Markup.Contains("File3.txt"), TimeSpan.FromSeconds(2));
+
+        // Act
+        var rows = cut.FindAll("tr").Where(row => row.TextContent.Contains("File", StringComparison.Ordinal)).ToList();
+        Assert.IsGreaterThanOrEqualTo(3, rows.Count, "Expected 3 item rows rendered.");
+
+        rows[0].Click(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+        rows = cut.FindAll("tr").Where(row => row.TextContent.Contains("File", StringComparison.Ordinal)).ToList();
+        rows[2].Click(new Microsoft.AspNetCore.Components.Web.MouseEventArgs { ShiftKey = true });
+
+        // Assert
+        var dataGrid = cut.FindComponent<RadzenDataGrid<FileSystemItem>>();
+        var selectedItems = dataGrid.Instance.Value?.Cast<FileSystemItem>().ToList() ?? [];
+        Assert.HasCount(3, selectedItems, "Expected all 3 details rows to be selected via Shift+Click.");
     }
 
     [TestMethod]
