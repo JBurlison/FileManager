@@ -21,6 +21,7 @@
     <RadzenButton Text="Restore" Icon="restore" Click="@RestoreSelected" Disabled="@(!CanRestore)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Success" aria-label="Restore Selected Items" />
     <RadzenButton Text="Empty Bin" Icon="delete_forever" Click="@EmptyRecycleBin" Disabled="@(!IsRecycleBin)" Class="rz-mr-4" ButtonStyle="ButtonStyle.Danger" aria-label="Empty Recycle Bin" />
 
+    <RadzenButton Text="Select All" Icon="select_all" Click="@SelectAllClick" Disabled="@(!CanSelectAll)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" title="Select all items (Ctrl+A)" aria-label="Select All Items" />
     <RadzenButton Text="Cut" Icon="content_cut" Click="@CutSelected" Disabled="@(!CanCut)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Cut Selected Items" />
     <RadzenButton Text="Copy" Icon="content_copy" Click="@CopySelected" Disabled="@(!CanCopy)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Copy Selected Items" />
     <RadzenButton Text="Paste" Icon="content_paste" Click="@PasteItems" Disabled="@(!CanPaste)" Class="rz-mr-2" ButtonStyle="ButtonStyle.Light" aria-label="Paste Items" />
@@ -1295,6 +1296,15 @@
     private bool CanCut => HasActiveItem;
     private bool CanCopy => HasActiveItem;
     private bool CanPaste => !string.IsNullOrEmpty(_currentPath) && Clipboard.Items.Any();
+    private bool CanSelectAll => _currentItems != null && _currentItems.Any();
+
+    private void SelectAllClick()
+    {
+        if (_currentItems == null) return;
+        var itemsList = _currentItems as IList<FileSystemItem> ?? _currentItems.ToList();
+        SelectAllItems(itemsList);
+        StateHasChanged();
+    }
 
     private bool IsGhosted(FileSystemItem item) 
     {

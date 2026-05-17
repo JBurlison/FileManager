@@ -125,13 +125,22 @@
                     return;
                 }
 
+                // Stop the original event from being handled by inner widgets (e.g., Radzen DataGrid)
+                // which would otherwise swallow keys like ArrowUp/Down or Ctrl+A before they
+                // can bubble up to the file-container's Blazor @onkeydown handler.
                 event.preventDefault();
-
-                if (eventStartedInsideFileView) {
-                    return;
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                    event.stopImmediatePropagation();
                 }
 
-                element.focus({ preventScroll: true });
+                if (!eventStartedInsideFileView) {
+                    element.focus({ preventScroll: true });
+                }
+
+                // Dispatch a forwarded copy directly to the file-container so Blazor's
+                // @onkeydown="OnKeyDown" fires reliably regardless of which descendant
+                // had focus when the user pressed the key.
                 element.dispatchEvent(createForwardedEvent(event));
             };
 
